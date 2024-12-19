@@ -1,0 +1,63 @@
+dataset_conf:
+  min_duration: 0.1
+  max_duration: 5
+  do_vad: False
+  sample_rate: 4000
+  use_dB_normalization: True
+  target_dB: -20
+  train_list: 'data/train0_features.txt'
+  test_list: 'data/test0_features.txt'
+  label_list_path: 'data/label_list.txt'
+  eval_conf:
+    batch_size: 64
+    max_duration: 10
+  dataLoader:
+    batch_size:   32
+    num_workers: 4
+    drop_last: True
+  aug_conf:
+    speed_perturb: False
+    volume_perturb: False
+    volume_aug_prob: 0.6
+    noise_dir: 'data/noise'
+    noise_aug_prob: 0.2
+  use_spec_aug: Ture
+  spec_aug_args:
+    freq_mask_width: [ 0, 8 ]
+    time_mask_width: [ 0, 10 ]
+
+
+preprocess_conf:
+  feature_method: 'MelSpectrogram'
+  method_args:
+    sample_rate: 4000
+    n_fft: 256
+    hop_length: 64
+    win_length: 256
+    f_min: 80.0  
+    f_max: 1000.0
+    n_mels: 32
+
+
+optimizer_conf:
+  optimizer: 'Adam'
+  learning_rate: 0.001
+  weight_decay: !!float 1e-6
+  scheduler: 'WarmupCosineSchedulerLR'
+  scheduler_args:
+    min_lr: !!float 1e-5
+    max_lr: 0.001
+    warmup_epoch: 5
+
+model_conf:
+  num_class: null
+
+train_conf:
+  enable_amp: False
+  use_compile: False
+  loss_weight: null
+  max_epoch: 200
+  log_interval: 5
+
+
+use_model: 'Res18'
