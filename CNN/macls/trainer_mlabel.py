@@ -84,8 +84,12 @@ class MAClsTrainer(object):
     def __init__(self, configs, use_gpu=True):
 
         if use_gpu:
-            assert (torch.cuda.is_available()), 'GPU can not be used'
-            self.device = torch.device("cuda")
+            if torch.cuda.is_available():
+                self.device = torch.device("cuda")
+            elif torch.backends.mps.is_available():
+                self.device = torch.device("mps")
+            else: 
+                assert (False), 'Accelerator can not be used'
         else:
             os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
             self.device = torch.device("cpu")
@@ -122,6 +126,8 @@ class MAClsTrainer(object):
         self.eval_loss, self.eval_acc = None, None
         self.test_log_step, self.train_log_step = 0, 0
         self.stop_train, self.stop_eval = False, False
+        self.audio_featurizer = AudioFeaturizer(feature_method=self.configs.preprocess_conf.feature_method,
+                                        method_args=self.configs.preprocess_conf.get('method_args', {}))
 
     def __setup_dataloader(self, is_train=False):
 
@@ -247,6 +253,7 @@ class MAClsTrainer(object):
                 raise Exception(f'Do not support function：{self.configs.optimizer_conf.scheduler}')
         if self.configs.train_conf.use_compile and torch.__version__ >= "2" and platform.system().lower() != 'windows':
             self.model = torch.compile(self.model, mode="reduce-overhead")
+        self.model.to(self.device)
 
     def __load_pretrained(self, pretrained_model):
         if pretrained_model is not None:
@@ -484,24 +491,66 @@ class MAClsTrainer(object):
                                            best_model=True)
                 self.__save_checkpoint(save_model_path=save_model_path, epoch_id=epoch_id, best_acc=self.eval_acc)
 
-
-
-
-
-    def evaluate(self, resume_model=None, save_matrix_path=None):
-
-        if self.test_loader is None:
-            self.__setup_dataloader()
+    def _setup_inference(self, resume_model):
         if self.model is None:
             self.__setup_model(input_size=self.audio_featurizer.feature_dim)
         if resume_model is not None:
+            resume_model_root = resume_model
             if os.path.isdir(resume_model):
                 resume_model = os.path.join(resume_model, 'model.pth')
             assert os.path.exists(resume_model), f"{resume_model} Model does not exist！"
-            model_state_dict = torch.load(resume_model)
+            model_state_dict = torch.load(resume_model, map_location=self.device)
             self.model.load_state_dict(model_state_dict)
+            with open(os.path.join(resume_model_root, 'model.state'), 'r', encoding='utf-8') as f:
+                json_data = json.load(f)
+                self.optimal_thresholds = json_data.get('optimal_thresholds', self.optimal_thresholds)
             logger.info(f'Sucessful upload model{resume_model}')
         self.model.eval()
+
+    def predict(self, data_or_path, resume_model=None):
+        self._setup_inference(resume_model)
+
+        ds = MAClsDataset(data_list_path=data_or_path,
+                                         audio_featurizer=self.audio_featurizer,
+                                         do_vad=self.configs.dataset_conf.do_vad,
+                                         max_duration=self.configs.dataset_conf.eval_conf.max_duration,
+                                         min_duration=self.configs.dataset_conf.min_duration,
+                                         sample_rate=self.configs.dataset_conf.sample_rate,
+                                         use_dB_normalization=self.configs.dataset_conf.use_dB_normalization,
+                                         target_dB=self.configs.dataset_conf.target_dB,
+                                         mode='eval')
+        loader = DataLoader(dataset=ds,
+                                    collate_fn=collate_fn,
+                                    shuffle=False,
+                                    batch_size=self.configs.dataset_conf.eval_conf.batch_size,
+                                    num_workers=self.configs.dataset_conf.dataLoader.num_workers)
+        
+        all_preds = []
+        all_outputs = []
+        with torch.no_grad():
+            for batch_id, (features, _, _) in enumerate(tqdm(loader)):
+                if self.stop_eval: break
+                features = features.to(self.device)
+
+                assert not self.model.training, "Model is in training mode during forward inference."
+                output = self.model(features)
+                
+                thresholds = self.optimal_thresholds #[0.681, 0.517, 0.612, 0.696] # ResNet; [0.6, 0.64, 0.62, 0.6] SP_CNN
+                preds = self.apply_optimal_thresholds(output,thresholds)
+                
+                all_outputs.append(output.cpu().numpy())
+                all_preds.append(preds.cpu().numpy())
+
+        all_outputs = np.vstack(all_outputs)
+        all_preds = np.vstack(all_preds)
+
+        return all_outputs, all_preds
+
+
+    def evaluate(self, resume_model=None, save_matrix_path=None):
+        if self.test_loader is None:
+            self.__setup_dataloader()
+        self._setup_inference(resume_model)
         if isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
             eval_model = self.model.module
         else:

@@ -30,10 +30,43 @@ class MAClsDataset(torch.utils.data.Dataset):
         self.audio_featurizer = audio_featurizer
         self.max_feature_len = self.get_crop_feature_len()
 
-        with open(data_list_path, 'r', encoding='utf-8') as f:
-            self.lines = f.readlines()
+        self.data = None
+        if type(data_list_path) == str:
+            with open(data_list_path, 'r', encoding='utf-8') as f:
+                self.lines = f.readlines()
+        else:
+            self.data = data_list_path
+
+    def _process_audio_segment(self, audio_segment: AudioSegment, idx):
+        if self.do_vad:
+            audio_segment.vad()
+
+        if audio_segment.duration < self.min_duration:
+            return self.__getitem__(idx + 1 if idx < len(self) - 1 else 0)
+
+        if audio_segment.sample_rate != self._target_sample_rate:
+            audio_segment.resample(self._target_sample_rate)
+
+        if self.mode == 'train':
+            audio_segment = self.augment_audio(audio_segment, **self.aug_conf)
+
+        if self._use_dB_normalization:
+            audio_segment.normalize(target_db=self._target_dB)
+
+        if self.mode != 'extract_feature' and audio_segment.duration > self.max_duration:
+            print(f"Warning: feature length {audio_segment.duration} is longer than max_duration {self.max_duration} - cropping")
+            audio_segment.crop(duration=self.max_duration, mode=self.mode)
+        samples = torch.tensor(audio_segment.samples, dtype=torch.float32)
+        feature = self.audio_featurizer(samples)
+        feature = feature.squeeze(0)
+        return feature
 
     def __getitem__(self, idx):
+        if self.data:
+            feature = self._process_audio_segment(self.data[idx], idx)
+            if type(feature) == tuple and len(feature) == 2: # skipped feature
+                return feature
+            return feature, None
 
         data_path, label_str = self.lines[idx].replace('\n', '').split('\t')
         labels = list(map(int, label_str.split()))  
@@ -41,6 +74,7 @@ class MAClsDataset(torch.utils.data.Dataset):
         if data_path.endswith('.npy'):
             feature = np.load(data_path)
             if feature.shape[0] > self.max_feature_len:
+                print(f"Warning: feature length {feature.shape[0]} is longer than max_feature_len {self.max_feature_len} - cropping")
                 crop_start = random.randint(0, feature.shape[0] - self.max_feature_len) if self.mode == 'eval' else 0
                 feature = feature[crop_start:crop_start + self.max_feature_len, :]
             feature = torch.tensor(feature, dtype=torch.float32)
@@ -48,34 +82,17 @@ class MAClsDataset(torch.utils.data.Dataset):
             audio_path, label_str = self.lines[idx].strip().split('\t')
             labels = list(map(int, label_str.split()))  
 
-
             audio_segment = AudioSegment.from_file(audio_path)
 
-            if self.do_vad:
-                audio_segment.vad()
-
-            if self.mode == 'train':
-                if audio_segment.duration < self.min_duration:
-                    return self.__getitem__(idx + 1 if idx < len(self.lines) - 1 else 0)
-
-            if audio_segment.sample_rate != self._target_sample_rate:
-                audio_segment.resample(self._target_sample_rate)
-
-            if self.mode == 'train':
-                audio_segment = self.augment_audio(audio_segment, **self.aug_conf)
-
-            if self._use_dB_normalization:
-                audio_segment.normalize(target_db=self._target_dB)
-
-            if self.mode != 'extract_feature' and audio_segment.duration > self.max_duration:
-                audio_segment.crop(duration=self.max_duration, mode=self.mode)
-            samples = torch.tensor(audio_segment.samples, dtype=torch.float32)
-            feature = self.audio_featurizer(samples)
-            feature = feature.squeeze(0)
+            feature = self._process_audio_segment(audio_segment, idx)
+            if type(feature) == tuple and len(feature) == 2: # skipped feature
+                return feature
         labels = torch.tensor(labels, dtype=torch.int32)  
         return feature, labels
 
     def __len__(self):
+        if self.data:
+            return len(self.data)
         return len(self.lines)
 
     def get_crop_feature_len(self):

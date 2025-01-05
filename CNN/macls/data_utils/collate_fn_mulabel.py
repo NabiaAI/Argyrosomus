@@ -3,7 +3,6 @@ import torch
 
 
 def collate_fn(batch):
-
     batch_sorted = sorted(batch, key=lambda sample: sample[0].size(0), reverse=True)
     freq_size = batch_sorted[0][0].size(1)
     max_freq_length = batch_sorted[0][0].size(0)
@@ -17,6 +16,9 @@ def collate_fn(batch):
         features[x, :seq_length, :] = tensor[:, :]
         labels.append(label)
         input_lens.append(seq_length)
-    labels = torch.stack(labels).int()
+    if all(label is None for label in labels):
+        labels = None
+    else:
+        labels = torch.stack(labels).int()
     input_lens = torch.tensor(input_lens, dtype=torch.int64)
     return features, labels, input_lens

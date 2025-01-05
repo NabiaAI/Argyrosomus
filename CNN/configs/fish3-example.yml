@@ -5,9 +5,9 @@ dataset_conf:
   sample_rate: 4000
   use_dB_normalization: True
   target_dB: -20
-  train_list: 'data/train0_features.txt'
-  test_list: 'data/test0_features.txt'
-  label_list_path: 'data/label_list.txt'
+  train_list: 'CNN/data/train0_features.txt'
+  test_list: 'CNN/data/test0_features.txt'
+  label_list_path: 'CNN/data/label_list.txt'
   eval_conf:
     batch_size: 64
     max_duration: 10
@@ -19,7 +19,7 @@ dataset_conf:
     speed_perturb: False
     volume_perturb: False
     volume_aug_prob: 0.6
-    noise_dir: 'data/noise'
+    noise_dir: 'CNN/data/noise'
     noise_aug_prob: 0.2
   use_spec_aug: Ture
   spec_aug_args:
