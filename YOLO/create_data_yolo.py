@@ -1,0 +1,356 @@
+import os
+import io
+import numpy as np 
+import matplotlib.pyplot as plt
+import librosa
+import librosa.display
+import glob
+import scipy.io.wavfile as wav
+import pandas as pd
+from PIL import Image, ImageDraw
+import os
+import shutil
+from tqdm import tqdm
+import random
+random.seed(42)
+
+debug = False
+total_labels = 0
+
+# Paths to the folders and files
+audio_folder = "./audio"
+image_folder = "./images"
+labels_folder = "./labels"
+
+segment_duration = 5  # segment duration in seconds
+stride = 5  # stride in seconds
+
+# Define the mapping of labels to indices
+CATEGORY_MAPPING = {
+    "w": 0,
+    "m": 1,
+    "lt": 2
+}
+
+
+def save_appended_audios(audio_folder):
+    # Join all wav files in the audio foldeer, save as appended.wav
+    # The file order should be alphabetical
+    path = os.path.join(audio_folder, "app_20210712_30840.wav")
+    if os.path.exists(path):
+        os.remove(path)
+
+    # Get a list of all.wav files in the audio folder
+    wav_files = glob.glob(os.path.join(audio_folder, "*.wav"))
+
+    # Sort the list of.wav files alphabetically
+    wav_files.sort()
+
+    # Initialize an empty list to store the audio data
+    audio_data = []
+
+    # Loop over the sorted.wav files
+    for file_path in wav_files:
+        # Load the.wav file
+        sample_rate, file_data = wav.read(file_path)
+
+        # Convert to mono if stereo
+        if file_data.ndim > 1:
+            file_data = np.mean(file_data, axis=1)
+
+        if len(file_data) == 0:
+            continue
+
+        # Append the audio data to the list
+        audio_data.append(file_data)
+
+    # Save the appended audio data to a new.wav file
+    wav.write(path, sample_rate, np.concatenate(audio_data))
+
+    print("Appended audio files saved successfully!")
+
+    
+
+# Function to save spectrogram without bounding boxes
+def save_spectrogram(segment, sr, file_name="", index=0, as_array = False):
+    # Set parameters for STFT
+    n_fft = 256
+    hop_length = 64
+
+    if sr != 4000:
+        segment = librosa.resample(segment, orig_sr=sr, target_sr=4000)
+        sr = 4000
+
+    # Calculate the spectrogram
+    D = np.abs(librosa.stft(segment, n_fft=n_fft, hop_length=hop_length))
+    S_db = librosa.amplitude_to_db(D, ref=np.max)
+
+    # Define the frequency range to display
+    freq_limit = 2000  # 2 kHz
+    max_freq_bin = min(D.shape[0], int(freq_limit / (sr / n_fft)))
+
+    # Clip the spectrogram to the desired frequency range
+    S_db_clipped = S_db[:max_freq_bin, :]
+
+    # Generate frequency bins for Y-axis (0–2kHz range)
+    freqs = np.linspace(0, freq_limit, max_freq_bin)
+
+    # Create a figure with no axis to save only the spectrogram image
+    fig = plt.figure(frameon=False)
+    fig.set_size_inches(10, 4)
+    ax = plt.Axes(fig, [0., 0., 1., 1.])
+    ax.set_axis_off()
+    fig.add_axes(ax)
+
+    # Display the spectrogram
+    librosa.display.specshow(
+        S_db_clipped,
+        sr=sr,
+        x_axis="time",
+        y_axis=None,  # Suppress automatic scaling
+        hop_length=hop_length,
+        ax=ax,
+    )
+
+    # Manually set Y-axis ticks and labels
+    ax.set_yticks(
+        np.linspace(0, S_db_clipped.shape[0], len(freqs)),
+        labels=np.round(freqs / 1000, 1),  # Convert Hz to kHz and round
+    )
+    ax.set_ylabel("Frequency (kHz)")
+
+    # Save the plot as a PNG file
+    if as_array:
+        output = io.BytesIO()
+    else: 
+        output = os.path.join(image_folder, f"{file_name}_segment_{index + 1}.png")
+    fig.savefig(output, bbox_inches='tight', pad_inches=0)
+    plt.close(fig)
+
+    if as_array:
+        output.seek(0)
+        output = np.array(Image.open(output).convert('RGB'))
+
+    return output
+
+
+def add_bounding_boxes(image_path, segment_start_time, segment_duration, sr, selections, labels_folder, base_name, stride_samples, idx):
+    global total_labels
+    # Open the saved spectrogram image
+    image = Image.open(image_path)
+    draw = ImageDraw.Draw(image)
+    
+    # Define the frequency limit for the spectrogram
+    freq_limit = 2000  # 2 kHz
+
+    segment_end_time = segment_start_time + segment_duration
+    segment_selections = selections[
+        (selections['End Time (s)'] > segment_start_time) & 
+        (selections['Begin Time (s)'] < segment_end_time)
+    ]
+    
+    # Prepare bounding box data for YOLO format text file
+    bounding_boxes = []
+
+    # Draw bounding boxes and labels
+    for _, row in segment_selections.iterrows():
+        begin_time, end_time = row['Begin Time (s)'], row['End Time (s)']
+        low_freq, high_freq = row['Low Freq (Hz)'], row['High Freq (Hz)']
+        category = row['category']
+
+        # Get the category index
+        category_index = CATEGORY_MAPPING.get(category)
+        if category_index is None:
+            continue  # Skip if the category is not recognized
+
+        # Convert time to X-axis coordinates
+        image_width, image_height = image.size
+        x0 = max((begin_time - segment_start_time) / segment_duration * image_width, 0)
+        x1 = min((end_time - segment_start_time) / segment_duration * image_width, image_width)
+
+       # Convert frequency to Y-axis coordinates based on the clipped range
+        if high_freq > freq_limit:
+            high_freq = freq_limit
+        if low_freq > freq_limit:
+            continue
+
+        # Calculate Y-axis coordinates based on frequency limits
+        y0 = image_height * (1 - low_freq / freq_limit)
+        y1 = image_height * (1 - high_freq / freq_limit)
+
+        #print raw box
+        # print(f"Raw box: [{x0}, {y0}, {x1}, {y1}] - segment {segment_start_time}")
+
+        # Ensure y0 is always less than y1
+        if y0 > y1:
+            y0, y1 = y1, y0
+
+        # Check if the bounding box is out of the image
+        is_out_of_bounds = (
+            x0 < 0 or x1 > image_width or y0 < 0 or y1 > image_height
+        )
+
+        if is_out_of_bounds:
+            # Only print and process if the box is actually out
+            print(f"Box out of bounds before truncation: [{x0}, {y0}, {x1}, {y1}] - segment {segment_start_time}")
+
+            # Truncate bounding box coordinates to fit the image
+            x0 = max(x0, 0)
+            x1 = min(x1, image_width)
+            y0 = max(y0, 0)
+            y1 = min(y1, image_height)
+
+            # After truncation, log the updated box
+            print(f"Box after truncation: [{x0}, {y0}, {x1}, {y1}] - segment {segment_start_time}")
+
+        # Check again if the box dimensions are invalid after truncation
+        if x1 <= x0 or y1 <= y0:
+            print(f"Invalid box dimensions after truncation: [{x0}, {y0}, {x1}, {y1}] - segment {segment_start_time}")
+            continue
+
+
+        # Draw rectangle and label
+        if debug:
+            # Optional debugging statement for valid bounding boxes
+            print(f"Valid box: [{x0}, {y0}, {x1}, {y1}] - segment {segment_start_time}")
+            draw.rectangle([x0, y0, x1, y1], outline="green", width=2)
+            draw.text((x0, y0), category, fill="white")
+
+        # Normalize coordinates for YOLO format (values between 0 and 1)
+        x_center = ((x0 + x1) / 2) / image_width
+        y_center = ((y0 + y1) / 2) / image_height
+        box_width = (x1 - x0) / image_width
+        box_height = (y1 - y0) / image_height
+
+        # Append annotation (index, x_center, y_center, box_width, box_height)
+        bounding_boxes.append(f"{category_index} {x_center:.6f} {y_center:.6f} {box_width:.6f} {box_height:.6f}")
+        total_labels += 1
+    
+    # Save the updated image with bounding boxes
+    image.save(image_path)
+
+    # Image filename and segement index:
+    txt_file_path = f"{base_name}_segment_{(idx)+1}.txt"
+
+    # Save the bounding box annotations to a text file
+    with open(os.path.join(labels_folder, txt_file_path), "w") as f:
+        f.write("\n".join(bounding_boxes))
+
+# Function to copy images and labels to the destination
+def copy_files(file_list, dest_images_folder, dest_labels_folder, src_images_folder, src_labels_folder):
+    for image_file in file_list:
+        # Image file path
+        src_image_path = os.path.join(src_images_folder, image_file)
+        dest_image_path = os.path.join(dest_images_folder, image_file)
+
+        # Label file path
+        label_file = os.path.splitext(image_file)[0] + ".txt"
+        src_label_path = os.path.join(src_labels_folder, label_file)
+        dest_label_path = os.path.join(dest_labels_folder, label_file)
+
+        # Copy image and label if both exist
+        if os.path.exists(src_image_path) and os.path.exists(src_label_path):
+            shutil.copy(src_image_path, dest_image_path)
+            shutil.copy(src_label_path, dest_label_path)
+
+
+def split_data():
+    # Output folders
+    output_training_images_folder = "./datasets/to_train/train/images"
+    output_training_labels_folder = "./datasets/to_train/train/labels"
+    output_validation_images_folder = "./datasets/to_train/valid/images"
+    output_validation_labels_folder = "./datasets/to_train/valid/labels"
+
+    # Split ratio
+    split_ratio = 0.85
+
+    # Create output folders
+    os.makedirs(output_training_images_folder, exist_ok=True)
+    os.makedirs(output_training_labels_folder, exist_ok=True)
+    os.makedirs(output_validation_images_folder, exist_ok=True)
+    os.makedirs(output_validation_labels_folder, exist_ok=True)
+
+    # Get a list of image files
+    image_files = [f for f in os.listdir(image_folder) if f.endswith(('.jpg', '.jpeg', '.png'))]
+
+    # Shuffle the image files to randomize the split
+    random.shuffle(image_files)
+
+    # Split the dataset
+    split_index = int(len(image_files) * split_ratio)
+    training_files = image_files[:split_index]
+    validation_files = image_files[split_index:]
+    # Copy training files
+    copy_files(training_files, output_training_images_folder, output_training_labels_folder, image_folder, labels_folder)
+    # Copy validation files
+    copy_files(validation_files, output_validation_images_folder, output_validation_labels_folder, image_folder, labels_folder)
+
+    print("Data split completed successfully!")
+
+def normalize_audio(audio_data):
+    # Convert audio data to floating point and normalize
+    return audio_data.astype(np.float32) / np.max(np.abs(audio_data))
+
+def read_audio_file(file_path):
+    sr, audio_data = wav.read(file_path)
+
+    # Convert to mono if stereo
+    if audio_data.ndim > 1:
+        audio_data = np.mean(audio_data, axis=1)
+
+    audio_data = normalize_audio(audio_data)
+
+    return sr, audio_data
+
+def create_spectrograms():
+    # Loop over all files in the audio folder
+
+    #audio_file_name = "Montijo_20210712_30840.wav"
+    #audio_file_name = "appended.wav"
+
+    for audio_file_name in os.listdir(audio_folder):
+        if not audio_file_name.endswith(".wav"):
+            continue
+
+        name = os.path.splitext(audio_file_name)[0]
+        selections = pd.read_csv(os.path.join(audio_folder, f"{name}.Table.1.selections.txt"), sep='\t')
+
+        images_generated = 0
+
+        file_path = os.path.join(audio_folder, audio_file_name)
+        base_name = os.path.splitext(audio_file_name)[0]  # get the base name without extension
+        print(f"Processing {audio_file_name}...")
+
+        # Load the .wav file
+        sample_rate, audio_data = read_audio_file(file_path)
+
+        # Calculate segment size in samples
+        segment_samples = segment_duration * sample_rate
+        stride_samples = stride * sample_rate
+
+        # Iterate over segments, save spectrograms, and add bounding boxes
+        for i in tqdm(range(0, len(audio_data) - segment_samples + 1, stride_samples)):
+            segment = audio_data[i:i + segment_samples]
+            segment_start_time = i / sample_rate  # Start time of the current segment
+            
+            segment_end_time = segment_start_time + segment_duration
+            latest_selection_end_time = selections['End Time (s)'].max()
+            if segment_end_time > latest_selection_end_time:
+                continue
+            
+            # Save the spectrogram image
+            image_path = save_spectrogram(segment, sample_rate, base_name, i // stride_samples)
+            
+            # Add bounding boxes to the saved image
+            #add_bounding_boxes(image_path, start_time, segment_duration, sample_rate)
+            add_bounding_boxes(image_path, segment_start_time, segment_duration, sample_rate, selections, labels_folder, base_name, stride_samples, i // stride_samples)
+            images_generated += 1
+
+
+if __name__ == '__main__':
+    os.makedirs(image_folder, exist_ok=True)
+    os.makedirs(labels_folder, exist_ok=True)
+
+    # save_appended_audios("abc")
+    create_spectrograms()
+    split_data()
