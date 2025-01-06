@@ -121,21 +121,30 @@ def load_list(input):
 
     return audio_list, labels_list, srs
 
-def audios_to_spectrograms(audios: list[np.array], srs, target_duration): # TODO: split audio if its too long
+def audios_to_spectrograms(audios: list[np.array], srs, target_duration, executor=None): # TODO: split audio if its too long
     spectrogram_list = []
     idxs = []
-    with ProcessPoolExecutor(max_workers=os.cpu_count()-1) as executor:
-        futures = {executor.submit(numpy_audio_to_spectrogram, audio, sr, target_duration): idx for idx, (audio, sr) in enumerate(zip(audios, srs, strict=True))}
-        for future in tqdm(as_completed(futures), total=len(futures)):
-            idx = futures[future]
-            spectrogram = future.result()
-            spectrogram_list.append(spectrogram)
-            idxs.append(idx)
+
+    close_executor = False
+    if executor is None:
+        executor = ProcessPoolExecutor(max_workers=os.cpu_count()-1)
+        close_executor = True
+
+    futures = {executor.submit(numpy_audio_to_spectrogram, audio, sr, target_duration): idx for idx, (audio, sr) in enumerate(zip(audios, srs, strict=True))}
+    for future in tqdm(as_completed(futures), total=len(futures)):
+        idx = futures[future]
+        spectrogram = future.result()
+        spectrogram_list.append(spectrogram)
+        idxs.append(idx)
+
+    if close_executor:
+        executor.shutdown()
+
     idx = np.argsort(np.array(idxs)) # sort back to original order
     spectrogram_list = np.array(spectrogram_list)[idx]
     return spectrogram_list
 
-def load_cached(input, cache_path=None, min_duration=0.1, target_duration=5, no_labels=False, sr=None):
+def load_cached(input, cache_path=None, min_duration=0.1, target_duration=5, no_labels=False, sr=None, executor=None):
     if cache_path:
         try:
             if no_labels:
@@ -155,7 +164,7 @@ def load_cached(input, cache_path=None, min_duration=0.1, target_duration=5, no_
 
     audio_list, labels, srs = filter_too_short(audio_list, labels, srs, min_duration)
     labels = np.array(labels, dtype='int') if labels is not None else None
-    spectrogram_list = audios_to_spectrograms(audio_list, srs, target_duration)
+    spectrogram_list = audios_to_spectrograms(audio_list, srs, target_duration, executor=executor)
 
     if cache_path:
         os.makedirs(cache_path, exist_ok=True)
@@ -180,6 +189,7 @@ class YOLOMultiLabelClassifier:
         self._model = YOLO(model_path)
         self.bounding_box_threshold = bounding_box_threshold
         self.device = device
+        self.imgsz = (64,320) # based on 4khz audio with 5s duration up to 1000 Hz
 
         if thresholds and isinstance(thresholds, str):
             self.thresholds = self.evaluate_and_adjust_thresholds(thresholds, ratio=0.2)
@@ -219,7 +229,8 @@ class YOLOMultiLabelClassifier:
         boxes = []
         for i in range(n_batches):
             batch = input[i * batch_size:(i + 1) * batch_size]
-            results = self._model.predict(batch, device=self.device, save=save, conf=self.bounding_box_threshold)
+            results = self._model.predict(batch, device=self.device, save=save, conf=self.bounding_box_threshold,
+                                          imgsz=self.imgsz,)# half=True)
             results = [result.cpu().numpy() for result in results]
             preds, probs = detection_to_cls_results(results, self.thresholds)
             predictions.extend(preds)

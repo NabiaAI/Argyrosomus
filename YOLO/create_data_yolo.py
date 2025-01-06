@@ -86,7 +86,7 @@ def save_spectrogram(segment, sr, file_name="", index=0, as_array = False):
     S_db = librosa.amplitude_to_db(D, ref=np.max)
 
     # Define the frequency range to display
-    freq_limit = 1000  # kHz
+    freq_limit = 1000 # Hz
     max_freq_bin = min(D.shape[0], int(freq_limit / (sr / n_fft)))
     S_db_clipped = S_db[:max_freq_bin, :]
     # flip the image vertically so low frequencies are at the bottom
@@ -113,7 +113,7 @@ def add_bounding_boxes(image_path, segment_start_time, segment_duration, sr, sel
     draw = ImageDraw.Draw(image)
     
     # Define the frequency limit for the spectrogram
-    freq_limit = 2000  # 2 kHz
+    freq_limit = 1000  # Hz
 
     segment_end_time = segment_start_time + segment_duration
     segment_selections = selections[

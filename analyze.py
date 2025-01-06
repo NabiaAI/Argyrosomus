@@ -19,6 +19,7 @@ from tqdm import tqdm
 import math
 from YOLO.create_data_yolo import normalize_audio
 from YOLO.infer_yolo import YOLOMultiLabelClassifier, load_cached, segment_audios
+from concurrent.futures import ProcessPoolExecutor
     
 def infer_cnn(args, audios, sample_rate):
     audios = [AudioSegment.from_ndarray(audio, sample_rate) for audio in audios]
@@ -29,14 +30,16 @@ def infer_cnn(args, audios, sample_rate):
 def infer_yolo(audios, sample_rate):
     model = YOLOMultiLabelClassifier("YOLO/runs/detect/trainMPS_moredata/weights/best.pt",)
     audios = [normalize_audio(audio) for audio in audios]
+    # persistant executor to speed up spectrogram creation
+    executor = ProcessPoolExecutor(max_workers=os.cpu_count()-1)
     # bach inference
-    batch_size = 256
+    batch_size = 1024
     n_batches = math.ceil(len(audios) / batch_size)
     preds = []
     boxes = []
     for i in tqdm(range(n_batches)):
         batch = audios[i * batch_size:(i + 1) * batch_size]
-        batch = load_cached(batch, cache_path=None, sr=sample_rate, no_labels=True)
+        batch = load_cached(batch, cache_path=None, sr=sample_rate, no_labels=True, executor=executor)
         batch_preds, _, batch_boxes = model.predict(batch, save=False, batch_size=64, return_boxes=True)
         preds.extend(batch_preds)
         boxes.extend(batch_boxes)
