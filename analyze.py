@@ -24,7 +24,7 @@ def infer_cnn(args, audios, sample_rate):
     audios = [AudioSegment.from_ndarray(audio, sample_rate) for audio in audios]
     trainer = MAClsTrainer(configs=args.configs, use_gpu=args.use_gpu)
     outs, preds = trainer.predict(audios,resume_model=args.resume_model)
-    return outs,preds
+    return preds,outs
 
 def infer_yolo(audios, sample_rate):
     model = YOLOMultiLabelClassifier("YOLO/runs/detect/trainMPS_moredata/weights/best.pt",)

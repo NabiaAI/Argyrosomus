@@ -86,46 +86,18 @@ def save_spectrogram(segment, sr, file_name="", index=0, as_array = False):
     S_db = librosa.amplitude_to_db(D, ref=np.max)
 
     # Define the frequency range to display
-    freq_limit = 2000  # 2 kHz
+    freq_limit = 1000  # kHz
     max_freq_bin = min(D.shape[0], int(freq_limit / (sr / n_fft)))
-
-    # Clip the spectrogram to the desired frequency range
     S_db_clipped = S_db[:max_freq_bin, :]
-
-    # Generate frequency bins for Y-axis (0–2kHz range)
-    freqs = np.linspace(0, freq_limit, max_freq_bin)
-
-    # Create a figure with no axis to save only the spectrogram image
-    fig = plt.figure(frameon=False)
-    fig.set_size_inches(10, 4)
-    ax = plt.Axes(fig, [0., 0., 1., 1.])
-    ax.set_axis_off()
-    fig.add_axes(ax)
-
-    # Display the spectrogram
-    librosa.display.specshow(
-        S_db_clipped,
-        sr=sr,
-        x_axis="time",
-        y_axis=None,  # Suppress automatic scaling
-        hop_length=hop_length,
-        ax=ax,
-    )
-
-    # Manually set Y-axis ticks and labels
-    ax.set_yticks(
-        np.linspace(0, S_db_clipped.shape[0], len(freqs)),
-        labels=np.round(freqs / 1000, 1),  # Convert Hz to kHz and round
-    )
-    ax.set_ylabel("Frequency (kHz)")
+    # flip the image vertically so low frequencies are at the bottom
+    S_db_flipped = S_db_clipped[::-1, :]  
 
     # Save the plot as a PNG file
     if as_array:
         output = io.BytesIO()
     else: 
         output = os.path.join(image_folder, f"{file_name}_segment_{index + 1}.png")
-    fig.savefig(output, bbox_inches='tight', pad_inches=0)
-    plt.close(fig)
+    plt.imsave(output, S_db_flipped, cmap='magma')
 
     if as_array:
         output.seek(0)
