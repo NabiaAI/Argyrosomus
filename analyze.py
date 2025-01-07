@@ -28,7 +28,7 @@ def infer_cnn(args, audios, sample_rate):
     return preds,outs
 
 def infer_yolo(audios, sample_rate):
-    model = YOLOMultiLabelClassifier("YOLO/runs/detect/trainMPS_moredata/weights/best.pt",)
+    model = YOLOMultiLabelClassifier("YOLO/runs/detect/trainMPS_moredata/weights",)
     audios = [normalize_audio(audio) for audio in audios]
     # persistant executor to speed up spectrogram creation
     executor = ProcessPoolExecutor(max_workers=os.cpu_count()-1)

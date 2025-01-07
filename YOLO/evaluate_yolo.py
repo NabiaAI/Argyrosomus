@@ -13,9 +13,9 @@ sys.path.append('.')
 from infer_yolo import YOLOMultiLabelClassifier, load_cached
 sys.path.append('macls')
 import quantification as quant
-import common
+#import common
 
-model_path = "YOLO/runs/detect/trainMPS_moredata/weights/best.pt"
+model_path = "YOLO/runs/detect/trainMPS_moredata/weights"
 test_list = "data/new/test0.txt"
 train_list = "data/new/train0.txt"
 save_matrix_path = "data/output"
@@ -87,7 +87,7 @@ if __name__ == '__main__':
 
     which = ['lt', 'm', 'w']
     evaluate_results(preds, labels, which, model_path.split('/')[-3])
-    common.print_combined_multilabel_confusion_matrix("data/output/yolo_multi-label_cm.pdf", labels, preds, list(range(len(which))), which, title=None)
+    #common.print_combined_multilabel_confusion_matrix("data/output/yolo_multi-label_cm.pdf", labels, preds, list(range(len(which))), which, title=None)
         
     quant.eval_ratio_error(probs, preds, labels, probs, preds, labels, [0,1])
     quant.eval_ratio_error(probs, preds, labels, probs, preds, labels, [1,2])

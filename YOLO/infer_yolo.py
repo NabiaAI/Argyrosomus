@@ -7,6 +7,7 @@ from sklearn.metrics import precision_recall_curve
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from scipy.io import wavfile as wav
 import time
+import json
 
 sys.path.append('.')
 from create_data_yolo import save_spectrogram, read_audio_file, normalize_audio
@@ -88,6 +89,9 @@ def numpy_audio_to_spectrogram(audio, sr, target_duration=5):
     if len(audio) < target_duration * sr:
         length = int(target_duration * sr)
         audio = np.pad(audio, (0, length - len(audio)), 'constant')
+    if len(audio) > target_duration * sr:
+        print(f"WARNING: Audio is longer than target duration -> CROPPING (cut {len(audio) / sr - target_duration:.3}s off)")
+        audio = audio[:int(target_duration * sr)]
     spectrogram = save_spectrogram(audio, sr, as_array=True)
     return spectrogram
 
@@ -106,6 +110,7 @@ def load_list(input):
     labels_list = []
     audio_list = []
     srs = []
+    skipped = 0
     for line in lines:
         results = line.strip().split('\t')
         file_path = results[0]
@@ -114,11 +119,16 @@ def load_list(input):
             labels = labels.split(' ')
         else:
             labels = [-1]
+        if not os.path.exists(file_path):
+            skipped += 1
+            continue
         sr, audio = read_audio_file(file_path)
         labels_list.append(labels)
         audio_list.append(audio)
         srs.append(sr)
 
+    if skipped > 0:
+        print(f"WARNING: Skipped {skipped} files which did not exist")
     return audio_list, labels_list, srs
 
 def audios_to_spectrograms(audios: list[np.array], srs, target_duration, executor=None): # TODO: split audio if its too long
@@ -186,20 +196,26 @@ def get_boxes(results):
 class YOLOMultiLabelClassifier:
     def __init__(self, model_path, *, device='mps', bounding_box_threshold=0.25, thresholds=None):
         from ultralytics import YOLO
-        self._model = YOLO(model_path)
+        if isinstance(model_path, str):
+            self._model = YOLO(f"{model_path}/best.pt")
+        else:
+            self._model = model_path
         self.bounding_box_threshold = bounding_box_threshold
         self.device = device
         self.imgsz = (64,320) # based on 4khz audio with 5s duration up to 1000 Hz
 
+        self.thresholds = None
         if thresholds and isinstance(thresholds, str):
-            self.thresholds = self.evaluate_and_adjust_thresholds(thresholds, ratio=0.2)
+            self.thresholds = self.evaluate_and_adjust_thresholds(thresholds, ratio=1.0)
         elif thresholds:
             self.thresholds = thresholds
         else:
-            self.thresholds = [0.2650397717952728, 0.5434091091156006, 0.3506118953227997]
+            with open(f"{model_path}/thresholds.json") as f:
+                self.thresholds = json.load(f)
+            # self.thresholds =  #[0.2650397717952728, 0.5434091091156006, 0.3506118953227997]
 
     def evaluate_and_adjust_thresholds(self, threshold_train_path, ratio):
-        spectrograms, labels = load_cached(threshold_train_path, cache_path='data/cache/threshold_train')
+        spectrograms, labels = load_cached(threshold_train_path, cache_path=None)
         idx = np.random.choice(len(spectrograms), int(ratio * len(spectrograms)), replace=False)
         spectrograms, labels = spectrograms[idx], labels[idx]
         _, probs = self.predict(spectrograms)
@@ -243,13 +259,15 @@ class YOLOMultiLabelClassifier:
         return np.array(predictions), np.array(probabilities)
     
 if __name__ == '__main__':
-    model_path = "YOLO/runs/detect/trainMPS_moredata/weights/best.pt"
-    model = YOLOMultiLabelClassifier(model_path)
+    model_path = "YOLO/runs/detect/trainMPS_moredata/weights"
+    model = YOLOMultiLabelClassifier(model_path,)
     _, audios, sample_rate = segment_audios(["/Users/I538904/Desktop/convert_to_wav/wav/20170420/2353_.wav"], extract_timestamps=False)
         #["/Users/I538904/Library/CloudStorage/OneDrive-SAPSE/Portugal/BadData+OtherLoggers/logger-7-MarinaExpo/20230627_200000.WAV"])
         #["/Users/I538904/Library/CloudStorage/OneDrive-SAPSE/Portugal/w_m_lt/1/Montijo_20210712_70140.wav"]
     audios = [normalize_audio(audio) for audio in audios]
-    audios = audios[0:64] # only a few
+    audios = audios[0:640] # only a few
     spectrograms = load_cached(audios, cache_path=None, sr=sample_rate, no_labels=True)
-    _, _, boxes = model.predict(spectrograms, save=True, return_boxes=True)
+    now = time.time()
+    _, _, boxes = model.predict(spectrograms, save=False, return_boxes=True)
+    print("Time taken:", time.time() - now)
     np.savez("runs/boxes.npz", *boxes)

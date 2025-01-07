@@ -1,8 +1,18 @@
 from ultralytics import YOLO
+from infer_yolo import YOLOMultiLabelClassifier
+import os
+import json
 
 pretrained = "yolo11n.pt"
 
 if __name__ == '__main__':
+    threshold_val_path = "../CNN/data/train0.txt"
+    assert os.path.exists(threshold_val_path), f"Path {threshold_val_path} does not exist"
+    train_path = "runs/detect/train"
+    if os.path.exists(train_path):
+        print(f"Skipping training as model already exists. Please delete {train_path} to train anew.")
+        exit()
+
     augmentations = {
         #"shear":20,
         "translate": 0,
@@ -12,10 +22,17 @@ if __name__ == '__main__':
         "erasing":0.2,
         "mixup":0.2,
     }
+    device = 'mps'
 
     model = YOLO(pretrained)
-    model.train(data='data.yaml', epochs=100, patience=20, device='mps', plots=False, **augmentations) # cache='disk' (default False)
+    model.train(data='data.yaml', epochs=100, patience=20, device=device, plots=False, **augmentations) # cache='disk' (default False)
 
     # # Resume training
     # model = YOLO("path/to/last.pt")  # load a partially trained model
     # results = model.train(resume=True)
+
+    print("Calculating optimal classification thresholds...")
+    model = YOLOMultiLabelClassifier(model, device=device, thresholds=threshold_val_path)
+    print("Saving optimal thresholds")
+    with open(f"{train_path}/weights/thresholds.json", 'w') as f:
+        json.dump(model.thresholds, f)
