@@ -1,92 +1,17 @@
 import numpy as np
 import sys
-import os
-import matplotlib.pyplot as plt
-import seaborn as sns
-from itertools import product
-
-from sklearn.metrics import multilabel_confusion_matrix
 
 sys.path.append('.')
 from infer_yolo import YOLOMultiLabelClassifier, load_cached
 sys.path.append('macls')
 import quantification as quant
-#import common
+import utils_eval as eval
 
 model_path = "YOLO/runs/detect/trainMPS_evenmoredata/weights"
 test_list = "CNN/data/test0.txt"
 train_list = "CNN/data/train0.txt"
 save_matrix_path = "data/output"
 bb_threshold = 0.25
-np.random.seed(0)
-
-
-def evaluate_results(all_preds, all_targets, class_labels, model_info):
-    # accuacy
-    accuracy = (all_preds == all_targets).mean()
-    print(f'Accuracy: {accuracy:.5f}')
-    #subset accuracy
-    subset_accuracy = (all_preds == all_targets).all(axis=1).mean()
-    print(f'Subset Accuracy: {subset_accuracy:.5f}')
-    # confusion matrix
-    cm = multilabel_confusion_matrix(all_targets, all_preds)
-    os.makedirs(save_matrix_path, exist_ok=True)
-    for i, matrix in enumerate(cm):
-        tn, fp, fn, tp = matrix.ravel()
-        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-        recall = tp / (tp + fn) if (tp + fn) > 0 else 0
-        accuracy = (tp + tn) / (tp + tn + fp + fn) if (tp + tn + fp + fn) > 0 else 0
-        output_string = f'Precision: {precision:.5f}, Recall: {recall:.5f}, Accuracy: {accuracy:.5f}'
-        print(f'Label: {class_labels[i]} - {output_string}')
-
-        plt.figure(figsize=(10, 8))
-        sns.heatmap(matrix, annot=True, fmt='d', cmap='Blues', vmin=0, vmax=600, cbar=False)
-        plt.xlabel('Predicted')
-        plt.ylabel('Actual')
-        # plt.title(f'Confusion Matrix for Label {class_labels[i]} - {output_string}\n{model_info}')
-        try:
-            plt.savefig(os.path.join(save_matrix_path, f'yolo_cm_label_{class_labels[i]}.pdf'), bbox_inches='tight', pad_inches=0)
-        except Exception as e:
-            print(f'Error: Save confusion martrix{e}')
-        plt.close()
-
-def print_combined_multilabel_confusion_matrix(path, y_true, y_pred, labels_idx, labels, title=None):
-    y_true = y_true[:, labels_idx]
-    y_pred = y_pred[:, labels_idx]
-
-    label_combinations = list(product([0, 1], repeat=y_true.shape[-1]))
-    label_combinations = [''.join([str(digit) for digit in label]) for label in label_combinations]
-    combined_cm = np.zeros((len(label_combinations), len(label_combinations)), dtype=int)
-    
-    for yt, yp in zip(y_true, y_pred):
-        yt = ''.join([str(int(label)) for label in yt])
-        yp = ''.join([str(int(label)) for label in yp])
-        yt_idx = label_combinations.index(yt)
-        yp_idx = label_combinations.index(yp)
-        combined_cm[yt_idx, yp_idx] += 1
-
-    for i in range(len(label_combinations)):
-        new_label = []
-        for digit_idx, digit in enumerate(label_combinations[i]):
-            if digit == '1':
-                new_label.append(labels[digit_idx])
-        if len(new_label) == 0:
-            new_label = ['-']
-        label_combinations[i] = ','.join(new_label)
-
-    plt.figure(figsize=(10, 8))
-    ax = sns.heatmap(combined_cm, annot=True, fmt='d', cmap='Blues', 
-                        xticklabels=label_combinations, yticklabels=label_combinations, vmax=300, vmin=0, cbar=False)
-    ax.tick_params(axis='both', which='major', labelsize=14)
-    plt.xlabel('Predicted')
-    plt.ylabel('Actual')
-    if title is not None:
-        plt.title(title)
-    try:
-        plt.savefig(path, bbox_inches='tight', pad_inches=0)
-    except Exception as e:
-        print(f'Save confusion martrix{e}')
-    plt.close()
 
 
 if __name__ == '__main__':
@@ -122,8 +47,9 @@ if __name__ == '__main__':
     np.savetxt('runs/probs.txt', np.hstack((idx, probs)), fmt='%f')
 
     which = ['lt', 'm', 'w']
-    evaluate_results(preds, labels, which, model_path.split('/')[-3])
-    print_combined_multilabel_confusion_matrix("data/output/yolo_multi-label_cm.pdf", labels, preds, list(range(len(which))), which, title=None)
+    eval.plot_roc_curves(labels, probs, which, "data/output/yolo_roc.pdf")
+    eval.evaluate_results(preds, labels, which, model_path.split('/')[-3], save_matrix_path)
+    eval.print_combined_multilabel_confusion_matrix("data/output/yolo_multi-label_cm.pdf", labels, preds, list(range(len(which))), which, title=None)
         
     quant.eval_ratio_error(probs, preds, labels, probs, preds, labels, [0,1])
     quant.eval_ratio_error(probs, preds, labels, probs, preds, labels, [1,2])

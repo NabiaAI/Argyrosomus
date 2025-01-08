@@ -37,6 +37,9 @@ import seaborn as sns
 import numpy as np
 from sklearn.metrics import confusion_matrix, multilabel_confusion_matrix
 import torch
+import sys
+sys.path.append('.')
+import utils_eval as eval
 
 
 logger = setup_logger(__name__)
@@ -560,6 +563,7 @@ class MAClsTrainer(object):
 
         all_preds = []
         all_targets = []
+        all_probs = []
         losses = []
         with torch.no_grad():
             for batch_id, (features, labels, input_lens) in enumerate(tqdm(self.test_loader)):
@@ -579,16 +583,19 @@ class MAClsTrainer(object):
                 
                 all_preds.append(preds.cpu().numpy())
                 all_targets.append(labels.cpu().numpy())
+                all_probs.append(output.cpu().numpy())
 
         acc = total_correct / total_samples
         loss = sum(losses) / len(losses)
         all_preds = np.vstack(all_preds)
         all_targets = np.vstack(all_targets)
+        all_probs = np.vstack(all_probs)
 
         print(f'Test Accuracy: {acc:.5f}')
 
 
         if save_matrix_path is not None:
+            eval.plot_roc_curves(all_targets, all_probs, self.class_labels, os.path.join(save_matrix_path, 'cnn_roc_curve.pdf'))
             try:
                 cm = multilabel_confusion_matrix(all_targets, all_preds)
                 os.makedirs(save_matrix_path, exist_ok=True)
@@ -598,7 +605,7 @@ class MAClsTrainer(object):
                     plt.xlabel('Predicted')
                     plt.ylabel('Actual')
                     plt.title(f'Confusion Matrix for Label {i}')
-                    plt.savefig(os.path.join(save_matrix_path, f'confusion_matrix_label_{i}_{int(time.time())}.png'))
+                    plt.savefig(os.path.join(save_matrix_path, f'confusion_matrix_label_{i}_{int(time.time())}.pdf'))
                     plt.close()
             except Exception as e:
                 logger.error(f'Save confusion martrix{e}')
