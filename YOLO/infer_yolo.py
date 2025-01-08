@@ -8,9 +8,53 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from scipy.io import wavfile as wav
 import time
 import json
+import pandas as pd
 
 sys.path.append('.')
 from create_data_yolo import save_spectrogram, read_audio_file, normalize_audio
+
+def y_coord_to_freq(coord):
+    # coord = freq / (sr / n_fft) # sr / n_fft = is size of each bin
+    # => freq = coord * (sr / n_fft)
+    sr, n_fft = 4000, 256 # MUST BE EXACTLY THE SAME AS FOR THE SPECTROGRAM CREATION
+    return coord * (sr / n_fft)
+
+def x_coord_to_time(coord):
+    # coord = coord / (sr / hop_length) # sr / hop_length = number of bins
+    sr, hop_length = 4000, 64 # MUST BE EXACTLY THE SAME AS FOR THE SPECTROGRAM CREATION
+    return coord / (sr / hop_length) # coord * (sr / hop_length)
+    
+
+def convert_to_raven_selection_table(input_array, time_shift=0, img_height=64):
+    img_height = 64 # RESULTS FROM SPECTROGRAM CREATION 
+    data = []
+    for idx, row in enumerate(input_array):
+        x1, y1, x2, y2, category, conf = row
+        x1, y1, x2, y2, conf = map(float, [x1, y1, x2, y2, conf]) # Convert strings to floats
+
+        # Calculate the desired output columns
+        begin_time = x_coord_to_time(x1) + time_shift
+        end_time = x_coord_to_time(x2) + time_shift
+        low_freq = y_coord_to_freq(img_height - y2) # y=0 is at top of spectrogram -> invert
+        high_freq = y_coord_to_freq(img_height- y1)
+
+        data.append([
+            idx + 1,  # Selection starts from 1
+            "Spectrogram 1",  # View
+            1,  # Channel
+            begin_time,
+            end_time,
+            low_freq,
+            high_freq,
+            category,
+            conf
+        ])
+
+    columns = [
+        "Selection", "View", "Channel", "Begin Time (s)", "End Time (s)",
+        "Low Freq (Hz)", "High Freq (Hz)", "category", "confidence"
+    ]
+    return pd.DataFrame(data, columns=columns)
 
 def extract_time_stamp(file_path:str):
     if file_path.endswith('_.wav'):
@@ -234,6 +278,33 @@ class YOLOMultiLabelClassifier:
         print("Producing precisions for each label:\t\t", optimal_precisions)
         print("Producing recalls for each label:\t\t", optimal_recalls)
         return optimal_thresholds
+    
+    def predict_file(self, file_path, *, save=False, raven_table=False):
+        segment_duration = 5
+        _, audios, sr = segment_audios([file_path], segment_duration=segment_duration, extract_timestamps=False)
+        audios = [normalize_audio(audio) for audio in audios]
+        spectrogram = load_cached(audios, cache_path=None, sr=sr, no_labels=True)
+        preds, probs, boxes = self.predict(spectrogram, save=save, return_boxes=True)
+
+        if not raven_table:
+            return preds, probs, boxes
+
+        time_shift = 0
+        frames = []
+        for b in boxes:
+            df = convert_to_raven_selection_table(b, time_shift, img_height=spectrogram[0].shape[1])
+            if len(df) == 0:
+                time_shift += segment_duration
+                continue
+            df.set_index("Selection", inplace=True)
+            frames.append(df)
+            time_shift += segment_duration
+
+        df = pd.concat(frames, ignore_index=True)
+        df.reset_index(inplace=True, names="Selection")
+        df["Selection"] += 1 # start from 1
+        df.to_csv(f"{os.path.splitext(file_path)[0]}.Table.1.selections.predicted.txt", sep="\t", index=False)
+        return preds, probs, boxes
 
     def predict(self, input, *, save=False, batch_size=64, return_boxes=False):
         if isinstance(input, np.ndarray) and input.ndim > 3 or isinstance(input, list) and isinstance(input[0], np.ndarray):
@@ -262,13 +333,8 @@ class YOLOMultiLabelClassifier:
 if __name__ == '__main__':
     model_path = "YOLO/runs/detect/trainMPS_evenmoredata/weights"
     model = YOLOMultiLabelClassifier(model_path,)
-    _, audios, sample_rate = segment_audios(["/Users/I538904/Desktop/convert_to_wav/wav/20170420/2353_.wav"], extract_timestamps=False)
+    input_file = "/Users/I538904/gitrepos/Argyrosomus/YOLO/audio/20170116_1130_.wav" # "/Users/I538904/Desktop/convert_to_wav/wav/20170420/2353_.wav"
         #["/Users/I538904/Library/CloudStorage/OneDrive-SAPSE/Portugal/BadData+OtherLoggers/logger-7-MarinaExpo/20230627_200000.WAV"])
         #["/Users/I538904/Library/CloudStorage/OneDrive-SAPSE/Portugal/w_m_lt/1/Montijo_20210712_70140.wav"]
-    audios = [normalize_audio(audio) for audio in audios]
-    audios = audios[0:640] # only a few
-    spectrograms = load_cached(audios, cache_path=None, sr=sample_rate, no_labels=True)
-    now = time.time()
-    _, _, boxes = model.predict(spectrograms, save=False, return_boxes=True)
-    print("Time taken:", time.time() - now)
+    _, _, boxes = model.predict_file(input_file, save=False, raven_table=True)
     np.savez("runs/boxes.npz", *boxes)
