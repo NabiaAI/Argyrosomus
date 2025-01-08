@@ -25,10 +25,10 @@ if __name__ == '__main__':
     device = 'mps'
 
     model = YOLO(pretrained)
-    model.train(data='data.yaml', epochs=100, patience=20, device=device, plots=False, **augmentations) # cache='disk' (default False)
+    model.train(data='data.yaml', epochs=100, patience=20, device=device, plots=False, imgsz=(64,320), **augmentations) # cache='disk' (default False)
 
     # # Resume training
-    # model = YOLO("path/to/last.pt")  # load a partially trained model
+    # model = YOLO("runs/detect/train/weights/last.pt")  # load a partially trained model
     # results = model.train(resume=True)
 
     print("Calculating optimal classification thresholds...")

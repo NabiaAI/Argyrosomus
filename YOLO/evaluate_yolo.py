@@ -1,12 +1,10 @@
-from ultralytics import YOLO
-import scipy.io.wavfile as wav
 import numpy as np
 import sys
-from tqdm import tqdm
 import os
 import matplotlib.pyplot as plt
 import seaborn as sns
-import time 
+from itertools import product
+
 from sklearn.metrics import multilabel_confusion_matrix
 
 sys.path.append('.')
@@ -15,9 +13,9 @@ sys.path.append('macls')
 import quantification as quant
 #import common
 
-model_path = "YOLO/runs/detect/trainMPS_moredata/weights"
-test_list = "data/new/test0.txt"
-train_list = "data/new/train0.txt"
+model_path = "YOLO/runs/detect/trainMPS_evenmoredata/weights"
+test_list = "CNN/data/test0.txt"
+train_list = "CNN/data/train0.txt"
 save_matrix_path = "data/output"
 bb_threshold = 0.25
 np.random.seed(0)
@@ -52,13 +50,51 @@ def evaluate_results(all_preds, all_targets, class_labels, model_info):
             print(f'Error: Save confusion martrix{e}')
         plt.close()
 
+def print_combined_multilabel_confusion_matrix(path, y_true, y_pred, labels_idx, labels, title=None):
+    y_true = y_true[:, labels_idx]
+    y_pred = y_pred[:, labels_idx]
+
+    label_combinations = list(product([0, 1], repeat=y_true.shape[-1]))
+    label_combinations = [''.join([str(digit) for digit in label]) for label in label_combinations]
+    combined_cm = np.zeros((len(label_combinations), len(label_combinations)), dtype=int)
+    
+    for yt, yp in zip(y_true, y_pred):
+        yt = ''.join([str(int(label)) for label in yt])
+        yp = ''.join([str(int(label)) for label in yp])
+        yt_idx = label_combinations.index(yt)
+        yp_idx = label_combinations.index(yp)
+        combined_cm[yt_idx, yp_idx] += 1
+
+    for i in range(len(label_combinations)):
+        new_label = []
+        for digit_idx, digit in enumerate(label_combinations[i]):
+            if digit == '1':
+                new_label.append(labels[digit_idx])
+        if len(new_label) == 0:
+            new_label = ['-']
+        label_combinations[i] = ','.join(new_label)
+
+    plt.figure(figsize=(10, 8))
+    ax = sns.heatmap(combined_cm, annot=True, fmt='d', cmap='Blues', 
+                        xticklabels=label_combinations, yticklabels=label_combinations, vmax=300, vmin=0, cbar=False)
+    ax.tick_params(axis='both', which='major', labelsize=14)
+    plt.xlabel('Predicted')
+    plt.ylabel('Actual')
+    if title is not None:
+        plt.title(title)
+    try:
+        plt.savefig(path, bbox_inches='tight', pad_inches=0)
+    except Exception as e:
+        print(f'Save confusion martrix{e}')
+    plt.close()
+
 
 if __name__ == '__main__':
-    thresholds =  [0.2650397717952728, 0.5434091091156006, 0.3506118953227997] # train_list
+    #thresholds =  [0.2650397717952728, 0.5434091091156006, 0.3506118953227997] # train_list
 
-    model = YOLOMultiLabelClassifier(model_path, thresholds=thresholds, bounding_box_threshold=bb_threshold)
-    spectrograms, labels = load_cached(test_list, 'data/cache/test') 
-    preds, probs = model.predict(spectrograms, save=True)
+    model = YOLOMultiLabelClassifier(model_path, bounding_box_threshold=bb_threshold)
+    spectrograms, labels = load_cached(test_list) 
+    preds, probs, boxes = model.predict(spectrograms, save=True, return_boxes=True)
 
     # filter out negatives (WHICH IS COMPLETELY INADEQUATE)
     # positives_idx =( labels[:, 1] == 1) | (labels[:, 2] == 1)
@@ -87,7 +123,7 @@ if __name__ == '__main__':
 
     which = ['lt', 'm', 'w']
     evaluate_results(preds, labels, which, model_path.split('/')[-3])
-    #common.print_combined_multilabel_confusion_matrix("data/output/yolo_multi-label_cm.pdf", labels, preds, list(range(len(which))), which, title=None)
+    print_combined_multilabel_confusion_matrix("data/output/yolo_multi-label_cm.pdf", labels, preds, list(range(len(which))), which, title=None)
         
     quant.eval_ratio_error(probs, preds, labels, probs, preds, labels, [0,1])
     quant.eval_ratio_error(probs, preds, labels, probs, preds, labels, [1,2])

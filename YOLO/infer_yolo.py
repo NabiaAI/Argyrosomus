@@ -97,6 +97,7 @@ def numpy_audio_to_spectrogram(audio, sr, target_duration=5):
 
 
 def load_list(input):
+    assert os.path.exists(input), f"Input path {input} does not exist"
     if os.path.isfile(input):
         with open(input) as f:
             lines = f.readlines()
@@ -259,7 +260,7 @@ class YOLOMultiLabelClassifier:
         return np.array(predictions), np.array(probabilities)
     
 if __name__ == '__main__':
-    model_path = "YOLO/runs/detect/trainMPS_moredata/weights"
+    model_path = "YOLO/runs/detect/trainMPS_evenmoredata/weights"
     model = YOLOMultiLabelClassifier(model_path,)
     _, audios, sample_rate = segment_audios(["/Users/I538904/Desktop/convert_to_wav/wav/20170420/2353_.wav"], extract_timestamps=False)
         #["/Users/I538904/Library/CloudStorage/OneDrive-SAPSE/Portugal/BadData+OtherLoggers/logger-7-MarinaExpo/20230627_200000.WAV"])
