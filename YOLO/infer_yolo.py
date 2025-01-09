@@ -311,7 +311,22 @@ class YOLOMultiLabelClassifier:
         df.to_csv(f"{os.path.splitext(file_path)[0]}.Table.1.selections.predicted.txt", sep="\t", index=False)
         return preds, probs, boxes
     
-
+    def filter_meagre_too_low(self, results, img_height):
+        if len(results) == 0:
+            return results
+        
+        names = results[0].names
+        def should_keep(box):
+            if names[int(box.cls[0])] != 'm':
+                return True
+            _, y1, _, y2 = img_height - box.xyxy[0] # invert y axis so low y = low freq
+            min_y = min(y1, y2)
+            min_freq = y_coord_to_freq(min_y)
+            return min_freq > self.threshold_meagre_hz
+ 
+        for result in results:
+            result.boxes = result.boxes[list(map(should_keep, result.boxes))]
+        return results
 
     def predict(self, input, *, save=False, batch_size=64, return_boxes=False, threshold_boxes=False):
         if isinstance(input, np.ndarray) and input.ndim > 3 or isinstance(input, list) and isinstance(input[0], np.ndarray):
@@ -327,7 +342,7 @@ class YOLOMultiLabelClassifier:
             results = self._model.predict(batch, device=self.device, save=save, conf=self.bounding_box_threshold,
                                           imgsz=self.imgsz,verbose=False)# half=True)
             results = [result.cpu().numpy() for result in results]
-            #results = self.filter_meagre_too_low(results)
+            results = self.filter_meagre_too_low(results, img_height=batch[0].shape[0])
             preds, probs = detection_to_cls_results(results, self.thresholds)
             predictions.extend(preds)
             probabilities.extend(probs)
@@ -348,7 +363,7 @@ class YOLOMultiLabelClassifier:
 if __name__ == '__main__':
     model_path = "YOLO/runs/detect/trainMPS_evenmoredata/weights"
     model = YOLOMultiLabelClassifier(model_path,)
-    input_file = "/Users/I538904/Desktop/convert_to_wav/wav/20240724/log00020.wav" # "/Users/I538904/Desktop/convert_to_wav/wav/20170420/2353_.wav"
+    input_file = "/Users/I538904/Desktop/convert_to_wav/wav/20240724/log00010.wav" # "/Users/I538904/Desktop/convert_to_wav/wav/20170420/2353_.wav"
         #["/Users/I538904/Library/CloudStorage/OneDrive-SAPSE/Portugal/BadData+OtherLoggers/logger-7-MarinaExpo/20230627_200000.WAV"])
         #["/Users/I538904/Library/CloudStorage/OneDrive-SAPSE/Portugal/w_m_lt/1/Montijo_20210712_70140.wav"]
     _, _, boxes = model.predict_file(input_file, save=False, raven_table=True, threshold_boxes=True)
