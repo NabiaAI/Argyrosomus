@@ -60,6 +60,9 @@ def extract_time_stamp(file_path:str):
     if file_path.endswith('_.wav'):
         idx = file_path.find('_.wav')
         hour_str = file_path[idx-4:idx] # 0416_.wav => 4h 16 min
+    elif 'log' in file_path:
+        hour_str = file_path.split('.')[-2][-2:] # log00001.wav => 1h; log00022.wav => 22h
+        hour_str += '00' # add minutes
     else:
         hour_str = file_path.split('_')[-1].split('.')[0] # eg date_120000.wav => 120000 = 12h; 
     assert hour_str.isdigit() and (len(hour_str) == 6 or len(hour_str) == 4), f"Hour string is not in the correct format: {hour_str}"
@@ -248,6 +251,8 @@ class YOLOMultiLabelClassifier:
         self.bounding_box_threshold = bounding_box_threshold
         self.device = device
         self.imgsz = (64,320) # based on 4khz audio with 5s duration up to 1000 Hz
+        self.label_indices = {'lt':0, 'm':1, 'w':2}
+        self.threshold_meagre_hz = 100
 
         self.thresholds = None
         if thresholds and isinstance(thresholds, str):
@@ -279,12 +284,12 @@ class YOLOMultiLabelClassifier:
         print("Producing recalls for each label:\t\t", optimal_recalls)
         return optimal_thresholds
     
-    def predict_file(self, file_path, *, save=False, raven_table=False):
+    def predict_file(self, file_path, *, save=False, raven_table=False, threshold_boxes=False):
         segment_duration = 5
         _, audios, sr = segment_audios([file_path], segment_duration=segment_duration, extract_timestamps=False)
         audios = [normalize_audio(audio) for audio in audios]
         spectrogram = load_cached(audios, cache_path=None, sr=sr, no_labels=True)
-        preds, probs, boxes = self.predict(spectrogram, save=save, return_boxes=True)
+        preds, probs, boxes = self.predict(spectrogram, save=save, return_boxes=True, threshold_boxes=threshold_boxes)
 
         if not raven_table:
             return preds, probs, boxes
@@ -305,8 +310,10 @@ class YOLOMultiLabelClassifier:
         df["Selection"] += 1 # start from 1
         df.to_csv(f"{os.path.splitext(file_path)[0]}.Table.1.selections.predicted.txt", sep="\t", index=False)
         return preds, probs, boxes
+    
 
-    def predict(self, input, *, save=False, batch_size=64, return_boxes=False):
+
+    def predict(self, input, *, save=False, batch_size=64, return_boxes=False, threshold_boxes=False):
         if isinstance(input, np.ndarray) and input.ndim > 3 or isinstance(input, list) and isinstance(input[0], np.ndarray):
             input = [spectro[...,::-1] for spectro in input]
         
@@ -318,13 +325,21 @@ class YOLOMultiLabelClassifier:
         for i in range(n_batches):
             batch = input[i * batch_size:(i + 1) * batch_size]
             results = self._model.predict(batch, device=self.device, save=save, conf=self.bounding_box_threshold,
-                                          imgsz=self.imgsz,)# half=True)
+                                          imgsz=self.imgsz,verbose=False)# half=True)
             results = [result.cpu().numpy() for result in results]
+            #results = self.filter_meagre_too_low(results)
             preds, probs = detection_to_cls_results(results, self.thresholds)
             predictions.extend(preds)
             probabilities.extend(probs)
             if return_boxes:
                 boxes.extend(get_boxes(results))
+
+        if threshold_boxes:
+            for i, box in enumerate(boxes):
+                if len(box) == 0:
+                    continue
+                thresholds = np.array(list(map(lambda x: self.thresholds[self.label_indices[x]], box[:, -2])))
+                boxes[i] = box[box[:, -1].astype('float') > thresholds]
         
         if return_boxes:
             return np.array(predictions), np.array(probabilities), boxes
@@ -333,8 +348,8 @@ class YOLOMultiLabelClassifier:
 if __name__ == '__main__':
     model_path = "YOLO/runs/detect/trainMPS_evenmoredata/weights"
     model = YOLOMultiLabelClassifier(model_path,)
-    input_file = "/Users/I538904/gitrepos/Argyrosomus/YOLO/audio/20170116_1130_.wav" # "/Users/I538904/Desktop/convert_to_wav/wav/20170420/2353_.wav"
+    input_file = "/Users/I538904/Desktop/convert_to_wav/wav/20240724/log00020.wav" # "/Users/I538904/Desktop/convert_to_wav/wav/20170420/2353_.wav"
         #["/Users/I538904/Library/CloudStorage/OneDrive-SAPSE/Portugal/BadData+OtherLoggers/logger-7-MarinaExpo/20230627_200000.WAV"])
         #["/Users/I538904/Library/CloudStorage/OneDrive-SAPSE/Portugal/w_m_lt/1/Montijo_20210712_70140.wav"]
-    _, _, boxes = model.predict_file(input_file, save=False, raven_table=True)
+    _, _, boxes = model.predict_file(input_file, save=False, raven_table=True, threshold_boxes=True)
     np.savez("runs/boxes.npz", *boxes)
