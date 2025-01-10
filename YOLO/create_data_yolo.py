@@ -13,14 +13,17 @@ import shutil
 from tqdm import tqdm
 import random
 random.seed(42)
+np.random.seed(42)
 
 debug = False
 total_labels = 0
 
 # Paths to the folders and files
-audio_folder = "./audio"
-image_folder = "./images"
-labels_folder = "./labels"
+audio_folder = "./data/audio"
+image_folder = "./data/images"
+labels_folder = "./data/labels"
+list_path = "./data/list.txt"
+segment_path = './data/audio_segments'
 
 segment_duration = 5  # segment duration in seconds
 stride = 5  # stride in seconds
@@ -72,7 +75,7 @@ def save_appended_audios(audio_folder):
     
 
 # Function to save spectrogram without bounding boxes
-def save_spectrogram(segment, sr, file_name="", index=0, as_array = False):
+def save_spectrogram(segment, sr, file_name="", index=0, as_array = False, save_audio_path = None):
     # Set parameters for STFT
     n_fft = 256
     hop_length = 64
@@ -99,6 +102,10 @@ def save_spectrogram(segment, sr, file_name="", index=0, as_array = False):
         output = os.path.join(image_folder, f"{file_name}_segment_{index + 1}.png")
     plt.imsave(output, S_db_flipped, cmap='magma')
 
+    if save_audio_path:
+        # Save the audio segment as a wav file
+        wav.write(os.path.join(save_audio_path, f"{file_name}_segment_{index + 1}.wav"), sr, segment)
+
     if as_array:
         output.seek(0)
         output = np.array(Image.open(output).convert('RGB'))
@@ -106,7 +113,7 @@ def save_spectrogram(segment, sr, file_name="", index=0, as_array = False):
     return output
 
 
-def add_bounding_boxes(image_path, segment_start_time, segment_duration, sr, selections, labels_folder, base_name, stride_samples, idx):
+def add_bounding_boxes(image_path, segment_start_time, segment_duration, sr, selections, labels_folder, base_name, stride_samples, idx, segment_audio_path=None):
     global total_labels
     # Open the saved spectrogram image
     image = Image.open(image_path)
@@ -123,12 +130,16 @@ def add_bounding_boxes(image_path, segment_start_time, segment_duration, sr, sel
     
     # Prepare bounding box data for YOLO format text file
     bounding_boxes = []
+    per_image_labels = [0, 0, 0]
+    classical_mapping = {"lt": 0, "m": 1, "w": 2}
 
     # Draw bounding boxes and labels
     for _, row in segment_selections.iterrows():
         begin_time, end_time = row['Begin Time (s)'], row['End Time (s)']
         low_freq, high_freq = row['Low Freq (Hz)'], row['High Freq (Hz)']
         category = row['category']
+
+        per_image_labels[classical_mapping[category]] = 1
 
         # Get the category index
         category_index = CATEGORY_MAPPING.get(category)
@@ -201,6 +212,11 @@ def add_bounding_boxes(image_path, segment_start_time, segment_duration, sr, sel
     # Save the updated image with bounding boxes
     image.save(image_path)
 
+    with open(list_path, 'a') as f:
+        label_str = " ".join([str(x) for x in per_image_labels])
+        p = os.path.join(segment_audio_path, f"{base_name}_segment_{(idx)+1}.wav")
+        f.write(f"{p}\t{label_str}\n")
+
     # Image filename and segement index:
     txt_file_path = f"{base_name}_segment_{(idx)+1}.txt"
 
@@ -244,12 +260,30 @@ def split_data():
 
     # Get a list of image files
     image_files = [f for f in os.listdir(image_folder) if f.endswith(('.jpg', '.jpeg', '.png'))]
+    image_files.sort()
 
-    # Shuffle the image files to randomize the split
-    random.shuffle(image_files)
+    with open(list_path, 'r') as f:
+        list_lines = f.readlines()
+        list_lines.sort()
+
+    assert len(list_lines) == len(image_files), f"Number of images and labels do not match: {len(list_lines)} vs {len(image_files)}"
+
+    rnd_idx = np.arange(len(list_lines))
+    np.random.shuffle(rnd_idx)
+    split_index = int(len(image_files) * split_ratio)
+
+
+    list_lines = [list_lines[i] for i in rnd_idx]
+    image_files = [image_files[i] for i in rnd_idx]
+
+    # save split list
+    base_path = os.path.splitext(list_path)[0]
+    with open(f"{base_path}_train.txt", 'w') as f:
+        f.writelines(list_lines[:split_index])
+    with open(f"{base_path}_valid.txt", 'w') as f:
+        f.writelines(list_lines[split_index:])
 
     # Split the dataset
-    split_index = int(len(image_files) * split_ratio)
     training_files = image_files[:split_index]
     validation_files = image_files[split_index:]
     # Copy training files
@@ -279,6 +313,8 @@ def create_spectrograms():
 
     #audio_file_name = "Montijo_20210712_30840.wav"
     #audio_file_name = "appended.wav"
+    if os.path.exists(list_path):
+        os.remove(list_path)
 
     for audio_file_name in os.listdir(audio_folder):
         if not audio_file_name.endswith(".wav"):
@@ -311,11 +347,12 @@ def create_spectrograms():
                 continue
             
             # Save the spectrogram image
-            image_path = save_spectrogram(segment, sample_rate, base_name, i // stride_samples)
+            image_path = save_spectrogram(segment, sample_rate, base_name, i // stride_samples, save_audio_path=segment_path)
             
             # Add bounding boxes to the saved image
             #add_bounding_boxes(image_path, start_time, segment_duration, sample_rate)
-            add_bounding_boxes(image_path, segment_start_time, segment_duration, sample_rate, selections, labels_folder, base_name, stride_samples, i // stride_samples)
+            add_bounding_boxes(image_path, segment_start_time, segment_duration, sample_rate, selections, labels_folder, base_name, stride_samples, i // stride_samples,
+                               segment_audio_path=segment_path)
             images_generated += 1
 
 

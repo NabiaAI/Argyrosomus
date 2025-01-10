@@ -2,15 +2,16 @@ import numpy as np
 import sys
 
 sys.path.append('.')
+sys.path.append('..')
 from infer_yolo import YOLOMultiLabelClassifier, load_cached
 sys.path.append('macls')
 import quantification as quant
 import utils_eval as eval
 
-model_path = "YOLO/runs/detect/trainMPS_evenmoredata/weights"
-test_list = "CNN/data/test0.txt"
-train_list = "CNN/data/train0.txt"
-save_matrix_path = "data/output"
+model_path = "runs/detect/trainMPS_evenmoredata/weights"
+test_list = "data/list_valid.txt"
+train_list = "data/list_train.txt"
+save_matrix_path = "../data/output"
 bb_threshold = 0.25
 
 
@@ -47,9 +48,9 @@ if __name__ == '__main__':
     np.savetxt('runs/probs.txt', np.hstack((idx, probs)), fmt='%f')
 
     which = ['lt', 'm', 'w']
-    eval.plot_roc_curves(labels, probs, which, "data/output/yolo_roc.pdf")
+    eval.plot_roc_curves(labels, probs, which, "../data/output/yolo_roc.pdf")
     eval.evaluate_results(preds, labels, which, model_path.split('/')[-3], save_matrix_path)
-    eval.print_combined_multilabel_confusion_matrix("data/output/yolo_multi-label_cm.pdf", labels, preds, list(range(len(which))), which, title=None)
+    eval.print_combined_multilabel_confusion_matrix("../data/output/yolo_multi-label_cm.pdf", labels, preds, list(range(len(which))), which, title=None)
         
     quant.eval_ratio_error(probs, preds, labels, probs, preds, labels, [0,1])
     quant.eval_ratio_error(probs, preds, labels, probs, preds, labels, [1,2])

@@ -363,7 +363,7 @@ class YOLOMultiLabelClassifier:
 if __name__ == '__main__':
     model_path = "YOLO/runs/detect/trainMPS_evenmoredata/weights"
     model = YOLOMultiLabelClassifier(model_path,)
-    input_file = "/Users/I538904/Desktop/convert_to_wav/wav/20240724/log00010.wav" # "/Users/I538904/Desktop/convert_to_wav/wav/20170420/2353_.wav"
+    input_file = "/Users/I538904/Desktop/convert_to_wav/wav/20170419/1153_.wav" # "/Users/I538904/Desktop/convert_to_wav/wav/20170420/2353_.wav"
         #["/Users/I538904/Library/CloudStorage/OneDrive-SAPSE/Portugal/BadData+OtherLoggers/logger-7-MarinaExpo/20230627_200000.WAV"])
         #["/Users/I538904/Library/CloudStorage/OneDrive-SAPSE/Portugal/w_m_lt/1/Montijo_20210712_70140.wav"]
     _, _, boxes = model.predict_file(input_file, save=False, raven_table=True, threshold_boxes=True)

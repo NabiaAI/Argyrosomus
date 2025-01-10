@@ -6,7 +6,7 @@ import json
 pretrained = "yolo11n.pt"
 
 if __name__ == '__main__':
-    threshold_val_path = "../CNN/data/train0.txt"
+    threshold_val_path = "./data/list.txt"
     assert os.path.exists(threshold_val_path), f"Path {threshold_val_path} does not exist"
     train_path = "runs/detect/train"
     if os.path.exists(train_path):
@@ -31,8 +31,8 @@ if __name__ == '__main__':
     # model = YOLO("runs/detect/train/weights/last.pt")  # load a partially trained model
     # results = model.train(resume=True)
 
-    print("Calculating optimal classification thresholds...")
-    model = YOLOMultiLabelClassifier(model, device=device, thresholds=threshold_val_path)
+    print("Calculating optimal classification thresholds for best model...")
+    model = YOLOMultiLabelClassifier(f"{train_path}/weights", device=device, thresholds=threshold_val_path)
     print("Saving optimal thresholds")
     with open(f"{train_path}/weights/thresholds.json", 'w') as f:
         json.dump(model.thresholds, f)
