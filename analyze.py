@@ -149,7 +149,7 @@ def analyze(in_path, n_boot=1, ):
     preds = preds[valid_times]
     times = times[valid_times]
 
-    aggregation_interval_minutes = 15
+    aggregation_interval_minutes = 10
     batch_number = 24*60 // aggregation_interval_minutes
     batch_size = len(preds) // batch_number
     all_ratios = []
@@ -189,6 +189,7 @@ def analyze(in_path, n_boot=1, ):
     print(trend_str)
 
     plot_analysis(all_ratios, all_lt_m_w_counts, n_boot, batch_number, slope, slope_ci, intercept, r_value, trend_str, path=in_path)
+    return all_lt_m_w_counts
 
 def infer_all(in_path, out_path):
     for root, dirs, _ in os.walk(in_path):
@@ -198,13 +199,34 @@ def infer_all(in_path, out_path):
             infer(args, path=p, out_path=out_path)
 
 def analyze_all(in_path):
+    dates=[]
+    sums = []
+    runs = 0
     for root, _, files in os.walk(in_path):
+        assert runs == 0, "Only one run is supported"
+        runs += 1
         files = sorted(files)
         for f in files:
             if f.endswith('_preds.npy'):
-                f = f.replace('_preds.npy', '')
+                f: str = f.replace('_preds.npy', '')
                 p = os.path.join(root, f)
-                analyze(p)
+                counts = analyze(p)
+                if "07" in f[4:6]: # only keep july
+                    dates.append(f)
+                    sums.append(counts.sum(axis=0))
+    sums = np.array(sums)
+    dates = list(map(lambda x: x[:4] + '.' + x[4:6] + '.' + x[6:], dates)) # format dates
+    dates = np.array(dates)
+
+    # plot the sums against the dates
+    plt.figure()
+    plt.plot(dates, sums[:,0], label='lt', marker="o", color='orange')
+    plt.plot(dates, sums[:,1], label='m', marker="x", color='green')
+    plt.plot(dates, sums[:,2], label='w', marker="+", color='red')
+    plt.xticks(np.arange(len(dates)), dates, rotation=90)
+    plt.legend()
+    plt.savefig(f'{in_path}/over_years.pdf', bbox_inches='tight', pad_inches=0)
+    plt.close()
 
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
