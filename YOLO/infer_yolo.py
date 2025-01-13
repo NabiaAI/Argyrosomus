@@ -11,7 +11,7 @@ import json
 import pandas as pd
 
 sys.path.append('.')
-from create_data_yolo import save_spectrogram, read_audio_file, normalize_audio
+from create_data_yolo import save_spectrogram, read_audio_file, normalize_audio, extract_time_stamp
 
 def y_coord_to_freq(coord):
     # coord = freq / (sr / n_fft) # sr / n_fft = is size of each bin
@@ -55,21 +55,6 @@ def convert_to_raven_selection_table(input_array, time_shift=0, img_height=64):
         "Low Freq (Hz)", "High Freq (Hz)", "category", "confidence"
     ]
     return pd.DataFrame(data, columns=columns)
-
-def extract_time_stamp(file_path:str):
-    if file_path.endswith('_.wav'):
-        idx = file_path.find('_.wav')
-        hour_str = file_path[idx-4:idx] # 0416_.wav => 4h 16 min
-    elif 'log' in file_path:
-        hour_str = file_path.split('.')[-2][-2:] # log00001.wav => 1h; log00022.wav => 22h
-        hour_str += '00' # add minutes
-    else:
-        hour_str = file_path.split('_')[-1].split('.')[0] # eg date_120000.wav => 120000 = 12h; 
-    assert hour_str.isdigit() and (len(hour_str) == 6 or len(hour_str) == 4), f"Hour string is not in the correct format: {hour_str}"
-    hour = int(hour_str[:2])
-    minute = int(hour_str[2:4])
-    time_in_seconds = hour * 3600 + minute * 60
-    return time_in_seconds
 
 def segment_audios(file_paths, segment_duration=5, stride=None, extract_timestamps=True):
     if stride is None:
@@ -363,7 +348,7 @@ class YOLOMultiLabelClassifier:
 if __name__ == '__main__':
     model_path = "YOLO/runs/detect/trainMPS_evenmoredata/weights"
     model = YOLOMultiLabelClassifier(model_path,)
-    input_file = "/Users/I538904/Desktop/convert_to_wav/wav/20170419/1153_.wav" # "/Users/I538904/Desktop/convert_to_wav/wav/20170420/2353_.wav"
+    input_file = "/Users/I538904/Desktop/convert_to_wav/wav/20240116/log00015.wav" # "/Users/I538904/Desktop/convert_to_wav/wav/20170420/2353_.wav"
         #["/Users/I538904/Library/CloudStorage/OneDrive-SAPSE/Portugal/BadData+OtherLoggers/logger-7-MarinaExpo/20230627_200000.WAV"])
         #["/Users/I538904/Library/CloudStorage/OneDrive-SAPSE/Portugal/w_m_lt/1/Montijo_20210712_70140.wav"]
     _, _, boxes = model.predict_file(input_file, save=False, raven_table=True, threshold_boxes=True)

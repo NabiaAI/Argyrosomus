@@ -308,6 +308,42 @@ def read_audio_file(file_path):
 
     return sr, audio_data
 
+def extract_time_stamp(file_path:str):
+    if file_path.endswith('_.wav'):
+        idx = file_path.find('_.wav')
+        hour_str = file_path[idx-4:idx] # 0416_.wav => 4h 16 min
+    elif 'log' in file_path:
+        hour_str = file_path.split('.')[-2][-2:] # log00001.wav => 1h; log00022.wav => 22h
+        hour_str += '00' # add minutes
+    else:
+        hour_str = file_path.split('_')[-1].split('.')[0] # eg date_120000.wav => 120000 = 12h; 
+    assert hour_str.isdigit() and (len(hour_str) == 6 or len(hour_str) == 4), f"Hour string is not in the correct format: {hour_str}"
+    hour = int(hour_str[:2])
+    minute = int(hour_str[2:4])
+    time_in_seconds = hour * 3600 + minute * 60
+    return time_in_seconds
+
+def cut_audio_file(file_path, start_wall_clock_time_s, end_wall_clock_time_s, save=True):
+    # Read the audio file
+    sr, audio_data = wav.read(file_path)
+
+    ts = extract_time_stamp(file_path)
+
+    # Calculate the start and end time in samples relative to audio
+    start_time = int((start_wall_clock_time_s - ts) * sr)
+    end_time = int((end_wall_clock_time_s - ts) * sr)
+
+    assert start_time >= 0 and end_time <= len(audio_data) and start_time < end_time, f"Invalid start or end time: {start_time}, {end_time}, {len(audio_data)}"
+
+    # Extract the segment
+    segment = audio_data[start_time:end_time]
+
+    if save:
+        p = f"{os.path.splitext(file_path)[0]}_{int(start_wall_clock_time_s)}_{int(end_wall_clock_time_s)}.wav"
+        wav.write(p, sr, segment)
+
+    return segment
+
 def create_spectrograms():
     # Loop over all files in the audio folder
 
@@ -360,6 +396,8 @@ if __name__ == '__main__':
     os.makedirs(image_folder, exist_ok=True)
     os.makedirs(labels_folder, exist_ok=True)
 
+    cut_audio_file("/Users/I538904/Desktop/convert_to_wav/wav/20161117/0757_.wav", 8*3600, 8*3600+10*60)
+
     # save_appended_audios("abc")
-    create_spectrograms()
-    split_data()
+    # create_spectrograms()
+    # split_data()
