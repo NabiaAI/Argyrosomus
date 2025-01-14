@@ -236,6 +236,7 @@ class YOLOMultiLabelClassifier:
         self.bounding_box_threshold = bounding_box_threshold
         self.device = device
         self.imgsz = (64,320) # based on 4khz audio with 5s duration up to 1000 Hz
+        self.iou=0.5
         self.label_indices = {'lt':0, 'm':1, 'w':2}
         self.threshold_meagre_hz = 100
 
@@ -290,7 +291,7 @@ class YOLOMultiLabelClassifier:
             frames.append(df)
             time_shift += segment_duration
 
-        df = pd.concat(frames, ignore_index=True)
+        df = pd.concat(frames, ignore_index=True) if len(frames) > 0 else df.drop(columns=["Selection"])
         df.reset_index(inplace=True, names="Selection")
         df["Selection"] += 1 # start from 1
         df.to_csv(f"{os.path.splitext(file_path)[0]}.Table.1.selections.predicted.txt", sep="\t", index=False)
@@ -324,7 +325,7 @@ class YOLOMultiLabelClassifier:
         boxes = []
         for i in range(n_batches):
             batch = input[i * batch_size:(i + 1) * batch_size]
-            results = self._model.predict(batch, device=self.device, save=save, conf=self.bounding_box_threshold,
+            results = self._model.predict(batch, device=self.device, save=save, conf=self.bounding_box_threshold, iou=self.iou,
                                           imgsz=self.imgsz,verbose=False)# half=True)
             results = [result.cpu().numpy() for result in results]
             results = self.filter_meagre_too_low(results, img_height=batch[0].shape[0])
@@ -348,8 +349,12 @@ class YOLOMultiLabelClassifier:
 if __name__ == '__main__':
     model_path = "YOLO/runs/detect/trainMPS_evenmoredata/weights"
     model = YOLOMultiLabelClassifier(model_path,)
-    input_file = "/Users/I538904/Desktop/convert_to_wav/wav/20240116/log00015.wav" # "/Users/I538904/Desktop/convert_to_wav/wav/20170420/2353_.wav"
-        #["/Users/I538904/Library/CloudStorage/OneDrive-SAPSE/Portugal/BadData+OtherLoggers/logger-7-MarinaExpo/20230627_200000.WAV"])
-        #["/Users/I538904/Library/CloudStorage/OneDrive-SAPSE/Portugal/w_m_lt/1/Montijo_20210712_70140.wav"]
-    _, _, boxes = model.predict_file(input_file, save=False, raven_table=True, threshold_boxes=True)
+
+    base = "YOLO/data/validation/"
+    for f in sorted(os.listdir(base)):
+        if f.endswith(".wav"):
+            input_file = os.path.join(base, f)
+            _, _, boxes = model.predict_file(input_file, save=False, raven_table=True, threshold_boxes=True)
+    # input_file = "YOLO/data/validation/20161117_0757-28800-29400.wav" # "/Users/I538904/Desktop/convert_to_wav/wav/20170420/2353_.wav"
+    # _, _, boxes = model.predict_file(input_file, save=False, raven_table=True, threshold_boxes=True)
     np.savez("runs/boxes.npz", *boxes)
