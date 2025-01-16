@@ -6,7 +6,7 @@ import json
 pretrained = "yolo11n.pt"
 
 if __name__ == '__main__':
-    threshold_val_path = "./data/list.txt"
+    threshold_val_path = "./data/list_train.txt"
     assert os.path.exists(threshold_val_path), f"Path {threshold_val_path} does not exist"
     train_path = "runs/detect/train"
     if os.path.exists(train_path):

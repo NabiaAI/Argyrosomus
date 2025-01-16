@@ -167,11 +167,11 @@ def run_count_method(val_preds, val_targets, test_preds, test_targets, which, co
     print(f"    with average test error over {n_test} resamples {ratio_err[0]} ({ratio_err[2] * 100}%)")
     print("---")
 
-    if val_preds is not None:
-        print("VAL", end=" ")
-        test_distributions(val_preds, val_targets, which, count_fn)
-    print("TEST", end=" ")
-    test_distributions(test_preds, test_targets, which, count_fn)
+    # if val_preds is not None:
+    #     print("VAL", end=" ")
+    #     test_distributions(val_preds, val_targets, which, count_fn)
+    # print("TEST", end=" ")
+    # test_distributions(test_preds, test_targets, which, count_fn)
 
 
 def eval_ratio_error(val_outputs, val_preds, val_targets, test_outputs, test_preds, test_targets, which, n_test = 50):

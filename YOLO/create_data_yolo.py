@@ -18,13 +18,6 @@ np.random.seed(42)
 debug = False
 total_labels = 0
 
-# Paths to the folders and files
-audio_folder = "./data/audio"
-image_folder = "./data/images"
-labels_folder = "./data/labels"
-list_path = "./data/list.txt"
-segment_path = './data/audio_segments'
-
 segment_duration = 5  # segment duration in seconds
 stride = 5  # stride in seconds
 
@@ -128,7 +121,7 @@ def save_spectrogram(segment, sr, *, file_name="", index=None, as_array = False,
     return output
 
 
-def add_bounding_boxes(image_path, segment_start_time, segment_duration, sr, selections, labels_folder, base_name, stride_samples, idx, segment_audio_path=None):
+def add_bounding_boxes(image_path, segment_start_time, segment_duration, sr, selections, labels_folder, base_name, stride_samples, idx, list_path, segment_audio_path=None):
     global total_labels
     # Open the saved spectrogram image
     image = Image.open(image_path)
@@ -257,7 +250,7 @@ def copy_files(file_list, dest_images_folder, dest_labels_folder, src_images_fol
             shutil.copy(src_label_path, dest_label_path)
 
 
-def split_data():
+def split_data(image_folder, labels_folder, list_path):
     # Output folders
     output_training_images_folder = "./datasets/to_train/train/images"
     output_training_labels_folder = "./datasets/to_train/train/labels"
@@ -364,11 +357,9 @@ def cut_audio_file(file_path, start_time_s, end_time_s, save_base_path=None):
 
     return segment, sr
 
-def create_spectrograms():
-    # Loop over all files in the audio folder
+def create_spectrograms(audio_folder, image_folder, labels_folder, segment_folder, list_path):
+    os.makedirs(image_folder, exist_ok=True), os.makedirs(labels_folder, exist_ok=True), os.makedirs(segment_folder, exist_ok=True) # create working dirs
 
-    #audio_file_name = "Montijo_20210712_30840.wav"
-    #audio_file_name = "appended.wav"
     if os.path.exists(list_path):
         os.remove(list_path)
 
@@ -403,18 +394,15 @@ def create_spectrograms():
                 continue
             
             # Save the spectrogram image
-            image_path = save_spectrogram(segment, sample_rate, file_name=base_name, index=i // stride_samples, save_audio_path=segment_path, image_folder=image_folder)
+            image_path = save_spectrogram(segment, sample_rate, file_name=base_name, index=i // stride_samples, save_audio_path=segment_folder, image_folder=image_folder)
             
             # Add bounding boxes to the saved image
-            #add_bounding_boxes(image_path, start_time, segment_duration, sample_rate)
             add_bounding_boxes(image_path, segment_start_time, segment_duration, sample_rate, selections, labels_folder, base_name, stride_samples, i // stride_samples,
-                               segment_audio_path=segment_path)
+                               list_path, segment_audio_path=segment_folder)
             images_generated += 1
 
 
 if __name__ == '__main__':
-    os.makedirs(image_folder, exist_ok=True)
-    os.makedirs(labels_folder, exist_ok=True)
 
     # create long-term spectrogram
     # day = "20170419"
@@ -454,6 +442,19 @@ if __name__ == '__main__':
     #     base = f"./data/validation/{p.split('/')[-2]}_{p.split('/')[-1].split('.')[0]}" 
     #     cut_audio_file(p, h*3600, h*3600+10*60,save_base_path=base)
 
-    # save_appended_audios("abc")
-    create_spectrograms()
-    split_data()
+    # create data for training (including split train and validation)
+    list_path = "./data/train/list.txt"
+    audio_folder = "./data/train/audio"
+    image_folder = "./data/train/images"
+    labels_folder = "./data/train/labels"
+    segment_folder = './data/train/audio_segments'
+    create_spectrograms(audio_folder, image_folder, labels_folder, segment_folder, list_path)
+    split_data(image_folder, labels_folder, list_path)
+
+    # create data only for validation/testing
+    list_path = "./data/validation/list.txt"
+    audio_folder = "./data/validation/audio"
+    image_folder = "./data/validation/images"
+    labels_folder = "./data/validation/labels"
+    segment_folder = './data/validation/audio_segments'
+    create_spectrograms(audio_folder, image_folder, labels_folder, segment_folder, list_path)
