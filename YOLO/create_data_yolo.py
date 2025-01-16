@@ -35,11 +35,14 @@ CATEGORY_MAPPING = {
     "lt": 2
 }
 
+def normalize_audio(audio_data):
+    # Convert audio data to floating point and normalize
+    return audio_data.astype(np.float32) / np.max(np.abs(audio_data))
 
-def save_appended_audios(audio_folder):
+def append_audios(audio_folder, save=False, normalize=False):
     # Join all wav files in the audio foldeer, save as appended.wav
     # The file order should be alphabetical
-    path = os.path.join(audio_folder, "app_20210712_30840.wav")
+    path = os.path.join(audio_folder, "appended.wav")
     if os.path.exists(path):
         os.remove(path)
 
@@ -52,10 +55,14 @@ def save_appended_audios(audio_folder):
     # Initialize an empty list to store the audio data
     audio_data = []
 
+    sample_rate_ref = -1
     # Loop over the sorted.wav files
     for file_path in wav_files:
         # Load the.wav file
         sample_rate, file_data = wav.read(file_path)
+        if sample_rate_ref == -1:
+            sample_rate_ref = sample_rate
+        assert sample_rate == sample_rate_ref, f"Sample rate mismatch: {sample_rate} vs {sample_rate_ref}"
 
         # Convert to mono if stereo
         if file_data.ndim > 1:
@@ -67,19 +74,20 @@ def save_appended_audios(audio_folder):
         # Append the audio data to the list
         audio_data.append(file_data)
 
-    # Save the appended audio data to a new.wav file
-    wav.write(path, sample_rate, np.concatenate(audio_data))
-
-    print("Appended audio files saved successfully!")
+    audio = np.concatenate(audio_data)
+    if normalize:
+        audio = normalize_audio(audio)
+    if save:
+        # Save the appended audio data to a new.wav file
+        wav.write(path, sample_rate, audio)
+        print("Appended audio files saved successfully!")
+    
+    return sample_rate, audio
 
     
 
 # Function to save spectrogram without bounding boxes
-def save_spectrogram(segment, sr, file_name="", index=0, as_array = False, save_audio_path = None):
-    # Set parameters for STFT
-    n_fft = 256
-    hop_length = 64
-
+def save_spectrogram(segment, sr, *, file_name="", index=None, as_array = False, save_audio_path = None, averaging_period_s=None, n_fft=256, hop_length=64, image_folder="."):
     if sr != 4000:
         segment = librosa.resample(segment, orig_sr=sr, target_sr=4000)
         sr = 4000
@@ -95,7 +103,14 @@ def save_spectrogram(segment, sr, file_name="", index=0, as_array = False, save_
     # flip the image vertically so low frequencies are at the bottom
     S_db_flipped = S_db_clipped[::-1, :]  
 
+    # average the spectrogram over a period of time in seconds along the time dimension (second axis)
+    if averaging_period_s:
+        averaging_period_samples = int(averaging_period_s * sr / hop_length)
+        S_db_flipped = S_db_flipped[:, :-(S_db_flipped.shape[1] % averaging_period_samples)] # trim spectrogram to fit buckets
+        S_db_flipped = np.mean(S_db_flipped.reshape(S_db_flipped.shape[0], -1, averaging_period_samples), axis=2)
+
     # Save the plot as a PNG file
+    segment_appendix = f"_segment_{index + 1}" if index is not None else ""
     if as_array:
         output = io.BytesIO()
     else: 
@@ -293,10 +308,6 @@ def split_data():
 
     print("Data split completed successfully!")
 
-def normalize_audio(audio_data):
-    # Convert audio data to floating point and normalize
-    return audio_data.astype(np.float32) / np.max(np.abs(audio_data))
-
 def read_audio_file(file_path):
     sr, audio_data = wav.read(file_path)
 
@@ -392,7 +403,7 @@ def create_spectrograms():
                 continue
             
             # Save the spectrogram image
-            image_path = save_spectrogram(segment, sample_rate, base_name, i // stride_samples, save_audio_path=segment_path)
+            image_path = save_spectrogram(segment, sample_rate, file_name=base_name, index=i // stride_samples, save_audio_path=segment_path, image_folder=image_folder)
             
             # Add bounding boxes to the saved image
             #add_bounding_boxes(image_path, start_time, segment_duration, sample_rate)
@@ -404,6 +415,12 @@ def create_spectrograms():
 if __name__ == '__main__':
     os.makedirs(image_folder, exist_ok=True)
     os.makedirs(labels_folder, exist_ok=True)
+
+    # create long-term spectrogram
+    # day = "20170419"
+    # n_fft, hop_length = 1024, 512 # PARAMETERS ONLY FOR LONG-TERM SPECTROGRAM (hop length = 50% overlap)
+    # sr, audio = append_audios(f"/Users/I538904/Desktop/convert_to_wav/wav/{day}", normalize=True)
+    # save_spectrogram(audio, sr, file_name=f"{day}_long-term", averaging_period_s=60, n_fft=n_fft, hop_length=hop_length)
 
     # cut file to specific time and move predictions
     # start_time = 0
