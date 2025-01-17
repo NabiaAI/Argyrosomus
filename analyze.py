@@ -1,5 +1,6 @@
 import sys
 import os
+import shutil
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(current_dir, '..', '..', '..'))
 sys.path.append(project_root)
@@ -17,6 +18,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 import math
+import pandas as pd
 from YOLO.create_data_yolo import normalize_audio
 from YOLO.infer_yolo import YOLOMultiLabelClassifier, load_cached, segment_audios
 from concurrent.futures import ProcessPoolExecutor
@@ -28,7 +30,7 @@ def infer_cnn(args, audios, sample_rate):
     return preds,outs
 
 def infer_yolo(audios, sample_rate):
-    model = YOLOMultiLabelClassifier("YOLO/runs/detect/trainMPS_evenmoredata/weights",)
+    model = YOLOMultiLabelClassifier("YOLO/runs/detect/trainMPS_additional/weights",)
     audios = [normalize_audio(audio) for audio in audios]
     # persistant executor to speed up spectrogram creation
     executor = ProcessPoolExecutor(max_workers=os.cpu_count()-1)
@@ -45,12 +47,16 @@ def infer_yolo(audios, sample_rate):
         boxes.extend(batch_boxes)
     return np.array(preds), boxes
 
-def infer(args, path: str, out_path):
+def infer(args, path: str, out_path, skip_existing=True):
     if os.path.isfile(path):
-        with open(path) as f:
-            lines = f.readlines()
-        paths = [line.strip().split('\t')[0] for line in lines]
-        name = os.path.basename(path)
+        if path.endswith('.txt'):
+            with open(path) as f:
+                lines = f.readlines()
+            paths = [line.strip().split('\t')[0] for line in lines]
+            name = os.path.basename(path)
+        if path.endswith('.wav'):
+            paths = [path]
+            name = os.path.splitext(os.path.basename(path))[0]
     else: 
         paths = _get_full_path_of_audio_files(path).values()
         name = path.split('/')[-1]
@@ -60,7 +66,7 @@ def infer(args, path: str, out_path):
     paths = sorted(paths)
     
     out_times, out_preds, out_boxes = f'{out_path}/{name}_times.npy', f'{out_path}/{name}_preds.npy', f'{out_path}/{name}_boxes.npz'
-    if os.path.exists(out_times) and os.path.exists(out_preds):
+    if os.path.exists(out_times) and os.path.exists(out_preds) and skip_existing:
         print(f"Skipping {name} as output files already exist")
         return
 
@@ -191,32 +197,98 @@ def analyze(in_path, n_boot=1, ):
     plot_analysis(all_ratios, all_lt_m_w_counts, n_boot, batch_number, slope, slope_ci, intercept, r_value, trend_str, path=in_path)
     return all_lt_m_w_counts
 
-def infer_all(in_path, out_path):
+def infer_all(in_path, out_path, skip_existing=True):
     for root, dirs, _ in os.walk(in_path):
         dirs = sorted(dirs)
         for d in tqdm(dirs):
             p = os.path.join(root, d)
-            infer(args, path=p, out_path=out_path)
+            infer(args, path=p, out_path=out_path, skip_existing=skip_existing)
 
-def analyze_all(in_path):
+def get_true_counts(path_to_selection_table):
+    label_idx_mapping = {
+        'lt': 0,
+        'm': 1,
+        'w': 2
+    }
+    df = pd.read_csv(path_to_selection_table, sep='\t')
+    if len(df) == 0:
+        return np.array([0,0,0])
+
+    labels = []
+    for start_time in range(0, int(df['End Time (s)'].max())+10, 5): # loop over segments of 5 seconds
+        end_time = start_time + 5
+        segment = df[
+            (df['End Time (s)'] > start_time) & 
+            (df['Begin Time (s)'] < end_time)
+        ]
+        categories = segment['category']
+        label = [0, 0, 0]
+        for c in categories:
+            label[label_idx_mapping[c]] = 1
+        labels.append(label)
+    return np.array(labels).sum(axis=0)
+
+def analyze_all(in_path, load_labels=False):
     dates=[]
     sums = []
     runs = 0
     for root, _, files in os.walk(in_path):
-        assert runs == 0, "Only one run is supported"
-        runs += 1
+        assert runs == 0, "Only one level is supported"
         files = sorted(files)
         for f in files:
             if f.endswith('_preds.npy'):
                 f: str = f.replace('_preds.npy', '')
                 p = os.path.join(root, f)
                 counts = analyze(p)
-                if "07" in f[4:6]: # only keep july
-                    dates.append(f)
-                    sums.append(counts.sum(axis=0))
+                dates.append(f)
+                sums.append(counts.sum(axis=0)/len(counts)) # average over time slots (negates the effect if a day has less data)
     sums = np.array(sums)
-    dates = list(map(lambda x: x[:4] + '.' + x[4:6] + '.' + x[6:], dates)) # format dates
     dates = np.array(dates)
+    return dates, sums
+
+def analyze_against_validation_data(validation_path, skip_existing=False):
+    dest = f"data/validation_analyzed"
+    for f in sorted(os.listdir(validation_path)):
+        p = os.path.join(validation_path, f)
+        if f.endswith('.wav'):
+            infer(args, path=p, out_path=dest, skip_existing=skip_existing)
+        if f.endswith('Table.1.selections.txt'):
+            shutil.copy(p, os.path.join(dest, f))
+
+    dates = []
+    sums = []
+    true_counts = []
+    for f in sorted(os.listdir(dest)):
+        p = os.path.join(dest, f)
+        if f.endswith('_preds.npy'):
+            preds = np.load(p) # shape (n, 3)
+            sums.append(preds.sum(axis=0))
+            raven_file = f'{p[:p.index('_preds.npy')]}.Table.1.selections.txt'
+            assert os.path.exists(raven_file), f"Labels not found for {p}"
+            true_counts.append(get_true_counts(raven_file))
+            dates.append(f)
+    
+    sums, true_counts = np.array(sums), np.array(true_counts)
+    dates = list(map(lambda x: f"{x[15:17]}h-{x[6:8]}.{x[4:6]}.{x[2:4]}", dates))
+
+    plt.figure(figsize=(14,8))
+    true_counts = true_counts - 0.5 # to make the plot more readable
+    plt.plot(dates, sums[:,0], label='lt YOLO', marker="", linestyle="--", color='orange')
+    plt.plot(dates, sums[:,1], label='m YOLO', marker="", linestyle="--",color='green')
+    plt.plot(dates, sums[:,2], label='w YOLO', marker="", linestyle="--",color='red')
+    plt.plot(dates, true_counts[:,0], label='lt gt', marker="", linestyle='-', color='orange')
+    plt.plot(dates, true_counts[:,1], label='m gt', marker="", linestyle='-',color='green')
+    plt.plot(dates, true_counts[:,2], label='w gt', marker="", linestyle='-',color='red')
+    plt.xticks(np.arange(len(dates)), dates, rotation=90)
+    plt.grid(axis='x', alpha=0.2)
+    plt.legend(fontsize='small')
+    plt.savefig(f'{dest}/result.pdf', bbox_inches='tight', pad_inches=0)
+    plt.close()
+
+
+def plot_over_time(in_path):
+    sums, dates = analyze_all(in_path)
+    dates = list(map(lambda x: x[:4] + '.' + x[4:6] + '.' + x[6:8], dates))
 
     # plot the sums against the dates
     plt.figure()
@@ -242,6 +314,8 @@ if __name__ == '__main__':
     args = parse_args()
     in_path = '/Users/I538904/Desktop/convert_to_wav/wav'
     out_path = 'data/analyzed'
-    infer_all(in_path, out_path)
+    # infer_all(in_path, out_path)
 
-    analyze_all(out_path)
+    # analyze_all(out_path)
+
+    analyze_against_validation_data('YOLO/data/validation/audio', skip_existing=True)

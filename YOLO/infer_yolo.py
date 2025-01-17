@@ -347,7 +347,7 @@ class YOLOMultiLabelClassifier:
         return np.array(predictions), np.array(probabilities)
     
 if __name__ == '__main__':
-    model_path = "YOLO/runs/detect/trainMPS_evenmoredata/weights"
+    model_path = "YOLO/runs/detect/trainMPS_additional/weights"
     model = YOLOMultiLabelClassifier(model_path,)
 
     base = "YOLO/data/validation/"

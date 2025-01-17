@@ -319,8 +319,12 @@ def extract_time_stamp(file_path:str):
     elif 'log' in file_path:
         hour_str = file_path.split('.')[-2][-2:] # log00001.wav => 1h; log00022.wav => 22h
         hour_str += '00' # add minutes
+    elif '_-' in file_path:
+        idx = file_path.find('_-')
+        hour_str = file_path[idx+2:idx+4] # 20161117_0757_-08.167-08.500.wav => 08.167 = 8h 10min
+        hour_str += str(int(float(file_path[idx+4:idx+7]) / 1000 * 60)).zfill(2) # add minutes
     else:
-        hour_str = file_path.split('_')[-1].split('.')[0] # eg date_120000.wav => 120000 = 12h; 
+        hour_str = file_path.split('/')[-1].split('_')[1][:6] # eg date_120000.wav => 120000 = 12h;
     assert hour_str.isdigit() and (len(hour_str) == 6 or len(hour_str) == 4), f"Hour string is not in the correct format: {hour_str}"
     hour = int(hour_str[:2])
     minute = int(hour_str[2:4])
@@ -390,8 +394,6 @@ def create_spectrograms(audio_folder, image_folder, labels_folder, segment_folde
             
             segment_end_time = segment_start_time + segment_duration
             latest_selection_end_time = selections['End Time (s)'].max()
-            if segment_end_time > latest_selection_end_time:
-                continue
             
             # Save the spectrogram image
             image_path = save_spectrogram(segment, sample_rate, file_name=base_name, index=i // stride_samples, save_audio_path=segment_folder, image_folder=image_folder)

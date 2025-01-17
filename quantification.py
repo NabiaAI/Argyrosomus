@@ -147,25 +147,27 @@ def test_distributions(preds, targets, which, count_fn, n_boot = 100):
     print(f"Mean relative errors over all distributions: {rel_errs[:,:2].mean(axis=0)} (SD {rel_errs[:,:2].std(axis=0)}) count, {rel_errs[:,2].mean():.2%} (SD {rel_errs[:,1].std():.2%}) ratio")
     print("---")
 
-def run_count_method(val_preds, val_targets, test_preds, test_targets, which, count_fn, n_test = 50, plot=False):
+def run_count_method(val_preds, val_targets, test_preds, test_targets, which_ratios: list[list], count_fn, n_test = 50, plot=False):
     true_counter = std_count
-    (abs_err, std_err, rel_err, std_rel_err, rmse), (r_err, _, rel_r_err, _, _) = bootstrap_error(val_preds, val_targets, which, count_fn, plot=plot)
+    which_counting = list(range(test_targets.shape[1]))
+    (abs_err, std_err, rel_err, std_rel_err, rmse), (r_err, _, rel_r_err, _, _) = bootstrap_error(val_preds, val_targets, which_counting, count_fn, plot=plot)
     print(f"count (m, w) errors measured from VAL :")
     [print("    ", s) for s in [f'±{e:.2f} 95%CI[{e-2*std_e:.2f},{e+2*std_e:.2f}] (±{rel_e:.2%} 95%CI[{rel_e-2*std_rel_e:.2%},{rel_e+2*std_rel_e:.2%}]); RMSE {rmse:.2f}' 
                                for e, std_e, rel_e, std_rel_e, rmse in zip(abs_err, std_err, rel_err, std_rel_err, rmse)]]
-    true_sums = true_counter(test_targets, which)
-    print(f"    with test error", np.abs(true_sums - count_fn(test_preds,which)), f"(counted {count_fn(test_preds,which)} of {true_sums} true samples)")
-    count_err, ratio_err = bootstrap_error(test_preds, test_targets, which, count_fn, n=n_test)
+    true_sums = true_counter(test_targets, which_counting)
+    print(f"    with test error", np.abs(true_sums - count_fn(test_preds,which_counting)), f"(counted {count_fn(test_preds,which_counting)} of {true_sums} true samples)")
+    count_err, ratio_err = bootstrap_error(test_preds, test_targets, which_counting, count_fn, n=n_test)
     print(f"    with average test error over {n_test} resamples {count_err[0]} ({count_err[2] * 100}%)", )
 
-    true_ratio = ratio(test_targets, which=which, count_fn=true_counter)
-    cc_ratio = ratio(test_preds, which=which, count_fn=count_fn)
-    print(f"ratio (m/w) errors measured from VAL : {cc_ratio:.3f} ")
-    print(f"               ±{r_err:.3f} (±{rel_r_err:.2%}%) MEASURED")
-    print(f"                      (±{propagate_ratio_error(rel_err[0], rel_err[1]):.2%}%) PROPAGATED from rel count errors")
-    print(f"    with test error", np.abs(true_ratio - cc_ratio), f"(pred. ratio {cc_ratio} of {true_ratio} true ratio)")
-    print(f"    with average test error over {n_test} resamples {ratio_err[0]} ({ratio_err[2] * 100}%)")
-    print("---")
+    for which in which_ratios:
+        true_ratio = ratio(test_targets, which=which, count_fn=true_counter)
+        cc_ratio = ratio(test_preds, which=which, count_fn=count_fn)
+        print(f"ratio (idx:{which[0]} / idx:{which[2]}) errors measured from VAL : {cc_ratio:.3f} ")
+        print(f"               ±{r_err:.3f} (±{rel_r_err:.2%}%) MEASURED")
+        print(f"                      (±{propagate_ratio_error(rel_err[0], rel_err[1]):.2%}%) PROPAGATED from rel count errors")
+        print(f"    with test error", np.abs(true_ratio - cc_ratio), f"(pred. ratio {cc_ratio} of {true_ratio} true ratio)")
+        print(f"    with average test error over {n_test} resamples {ratio_err[0]} ({ratio_err[2] * 100}%)")
+        print("---")
 
     # if val_preds is not None:
     #     print("VAL", end=" ")
@@ -174,7 +176,7 @@ def run_count_method(val_preds, val_targets, test_preds, test_targets, which, co
     # test_distributions(test_preds, test_targets, which, count_fn)
 
 
-def eval_ratio_error(val_outputs, val_preds, val_targets, test_outputs, test_preds, test_targets, which, n_test = 50):
+def eval_ratio_error(val_outputs, val_preds, val_targets, test_outputs, test_preds, test_targets, which_ratios: list[list], n_test = 50):
     np.random.seed(42)
 
     print("Evaluate ratio:")
@@ -187,7 +189,7 @@ def eval_ratio_error(val_outputs, val_preds, val_targets, test_outputs, test_pre
 
     print("--- CLASSIFY AND COUNT (CC) ---")
     count_fn = std_count
-    run_count_method(val_preds, val_targets, test_preds, test_targets, which, count_fn, n_test)
+    run_count_method(val_preds, val_targets, test_preds, test_targets, which_ratios, count_fn, n_test)
     print() 
     print()
 
