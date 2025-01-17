@@ -13,6 +13,7 @@ from CNN.macls.utils.utils import add_arguments
 from CNN.macls.data_utils.audio import AudioSegment
 from scipy.stats import linregress
 from scipy.interpolate import make_interp_spline
+import utils_eval as eval
 import pymannkendall 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -39,15 +40,17 @@ def infer_yolo(audios, sample_rate):
     n_batches = math.ceil(len(audios) / batch_size)
     preds = []
     boxes = []
+    box_preds = []
     for i in tqdm(range(n_batches)):
         batch = audios[i * batch_size:(i + 1) * batch_size]
         batch = load_cached(batch, cache_path=None, sr=sample_rate, no_labels=True, executor=executor)
-        batch_preds, _, batch_boxes = model.predict(batch, save=False, batch_size=64, return_boxes=True)
+        batch_preds, _, batch_boxes, box_preds_batch = model.predict(batch, save=False, batch_size=64, return_boxes=True, return_box_predictions=True)
         preds.extend(batch_preds)
         boxes.extend(batch_boxes)
-    return np.array(preds), boxes
+        box_preds.extend(box_preds_batch)
+    return np.array(preds), boxes, box_preds_batch
 
-def infer(args, path: str, out_path, skip_existing=True):
+def infer(args, path: str, out_path, skip_existing=True, save_box_preds=False):
     if os.path.isfile(path):
         if path.endswith('.txt'):
             with open(path) as f:
@@ -65,7 +68,7 @@ def infer(args, path: str, out_path, skip_existing=True):
             return
     paths = sorted(paths)
     
-    out_times, out_preds, out_boxes = f'{out_path}/{name}_times.npy', f'{out_path}/{name}_preds.npy', f'{out_path}/{name}_boxes.npz'
+    out_times, out_preds, out_boxes, out_bpreds = f'{out_path}/{name}_times.npy', f'{out_path}/{name}_preds.npy', f'{out_path}/{name}_boxes.npz', f'{out_path}/{name}_boxpreds.npy'
     if os.path.exists(out_times) and os.path.exists(out_preds) and skip_existing:
         print(f"Skipping {name} as output files already exist")
         return
@@ -74,10 +77,12 @@ def infer(args, path: str, out_path, skip_existing=True):
     times, audios, sample_rate = segment_audios(paths)
 
     #preds, boxes = infer_cnn(args, audios, sample_rate)
-    preds, boxes = infer_yolo(audios, sample_rate)
+    preds, boxes, box_preds = infer_yolo(audios, sample_rate)
     np.savez(out_boxes, *boxes)
     np.save(out_times, times)
     np.save(out_preds, preds)
+    if save_box_preds:
+        np.save(out_bpreds, box_preds)
 
 def _get_full_path_of_audio_files(audio_path):
     audio_files = {}
@@ -212,7 +217,7 @@ def get_true_counts(path_to_selection_table):
     }
     df = pd.read_csv(path_to_selection_table, sep='\t')
     if len(df) == 0:
-        return np.array([0,0,0])
+        return np.array([0,0,0]), np.array([0,0,0])
 
     labels = []
     for start_time in range(0, int(df['End Time (s)'].max())+10, 5): # loop over segments of 5 seconds
@@ -222,11 +227,12 @@ def get_true_counts(path_to_selection_table):
             (df['Begin Time (s)'] < end_time)
         ]
         categories = segment['category']
-        label = [0, 0, 0]
+        label = np.array([0, 0, 0])
         for c in categories:
-            label[label_idx_mapping[c]] = 1
+            label[label_idx_mapping[c]] += 1
         labels.append(label)
-    return np.array(labels).sum(axis=0)
+    labels = np.array(labels)
+    return np.clip(labels, 0, 1).sum(axis=0), labels.sum(axis=0)
 
 def analyze_all(in_path, load_labels=False):
     dates=[]
@@ -251,39 +257,35 @@ def analyze_against_validation_data(validation_path, skip_existing=False):
     for f in sorted(os.listdir(validation_path)):
         p = os.path.join(validation_path, f)
         if f.endswith('.wav'):
-            infer(args, path=p, out_path=dest, skip_existing=skip_existing)
+            infer(args, path=p, out_path=dest, skip_existing=skip_existing, save_box_preds=True)
         if f.endswith('Table.1.selections.txt'):
             shutil.copy(p, os.path.join(dest, f))
 
     dates = []
     sums = []
     true_counts = []
+    true_counts_total = []
+    box_preds_sums = []
     for f in sorted(os.listdir(dest)):
         p = os.path.join(dest, f)
         if f.endswith('_preds.npy'):
             preds = np.load(p) # shape (n, 3)
+            box_preds = np.load(f"{p[:p.index('_preds.npy')]}_boxpreds.npy")
             sums.append(preds.sum(axis=0))
+            box_preds_sums.append(box_preds.sum(axis=0))
+
             raven_file = f'{p[:p.index('_preds.npy')]}.Table.1.selections.txt'
             assert os.path.exists(raven_file), f"Labels not found for {p}"
-            true_counts.append(get_true_counts(raven_file))
+            segment_counts, total_counts = get_true_counts(raven_file)
+            true_counts.append(segment_counts), true_counts_total.append(total_counts)
             dates.append(f)
     
     sums, true_counts = np.array(sums), np.array(true_counts)
+    box_preds_sums, true_counts_total = np.array(box_preds_sums), np.array(true_counts_total)
     dates = list(map(lambda x: f"{x[15:17]}h-{x[6:8]}.{x[4:6]}.{x[2:4]}", dates))
 
-    plt.figure(figsize=(14,8))
-    true_counts = true_counts - 0.5 # to make the plot more readable
-    plt.plot(dates, sums[:,0], label='lt YOLO', marker="", linestyle="--", color='orange')
-    plt.plot(dates, sums[:,1], label='m YOLO', marker="", linestyle="--",color='green')
-    plt.plot(dates, sums[:,2], label='w YOLO', marker="", linestyle="--",color='red')
-    plt.plot(dates, true_counts[:,0], label='lt gt', marker="", linestyle='-', color='orange')
-    plt.plot(dates, true_counts[:,1], label='m gt', marker="", linestyle='-',color='green')
-    plt.plot(dates, true_counts[:,2], label='w gt', marker="", linestyle='-',color='red')
-    plt.xticks(np.arange(len(dates)), dates, rotation=90)
-    plt.grid(axis='x', alpha=0.2)
-    plt.legend(fontsize='small')
-    plt.savefig(f'{dest}/result.pdf', bbox_inches='tight', pad_inches=0)
-    plt.close()
+    eval.plot_validation_output(dates, sums, true_counts, save_path=f"{dest}/result_segment.pdf")
+    eval.plot_validation_output(dates, box_preds_sums, true_counts_total, save_path=f"{dest}/result_total_calls.pdf")
 
 
 def plot_over_time(in_path):

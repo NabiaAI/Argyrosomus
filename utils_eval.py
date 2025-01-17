@@ -9,6 +9,25 @@ from sklearn.metrics import multilabel_confusion_matrix, roc_curve, auc
 
 np.random.seed(0)
 
+def plot_validation_output(dates, sums, true_counts, save_path):
+    plt.figure(figsize=(14,6))
+    true_counts = true_counts - 0.5 # to make the plot more readable
+    for num, color in zip([0, 1, 2], ['orange', 'green', 'red']):
+        for d, yone, ytwo in zip(dates, sums[:,num], true_counts[:,num]):
+            plt.plot([d, d], [yone, ytwo], marker="", color=color, linestyle=":", linewidth=1)
+
+    plt.scatter(dates, sums[:,0], label='lt YOLO', marker="v",  color='orange')
+    plt.scatter(dates, sums[:,1], label='m YOLO', marker="v", color='green')
+    plt.scatter(dates, sums[:,2], label='w YOLO', marker="v", color='red')
+    plt.scatter(dates, true_counts[:,0], label='lt gt', marker="*",  color='orange')
+    plt.scatter(dates, true_counts[:,1], label='m gt', marker="*", color='green')
+    plt.scatter(dates, true_counts[:,2], label='w gt', marker="*", color='red')
+    plt.xticks(np.arange(len(dates)), dates, rotation=90)
+    plt.grid(axis='x', alpha=0.2)
+    plt.legend(fontsize='small')
+    plt.savefig(save_path, bbox_inches='tight', pad_inches=0)
+    plt.close()
+
 def plot_roc_curves(y_true, y_probs, labels, path):
     plt.rcdefaults()
     plt.figure()

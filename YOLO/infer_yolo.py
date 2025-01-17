@@ -270,17 +270,18 @@ class YOLOMultiLabelClassifier:
         print("Producing recalls for each label:\t\t", optimal_recalls)
         return optimal_thresholds
     
-    def predict_file(self, file_path, *, save=False, raven_table=False, threshold_boxes=False):
+    def predict_file(self, file_path, *, save=False, raven_table=False, threshold_boxes=False, return_box_predictions=False):
         segment_duration = 5
         _, audios, sr = segment_audios([file_path], segment_duration=segment_duration, extract_timestamps=False)
         audios = [normalize_audio(audio) for audio in audios]
         spectrogram = load_cached(audios, cache_path=None, sr=sr, no_labels=True)
-        preds, probs, boxes = self.predict(spectrogram, save=save, return_boxes=True, threshold_boxes=threshold_boxes)
+        ret = self.predict(spectrogram, save=save, return_boxes=True, threshold_boxes=threshold_boxes, return_box_predictions=return_box_predictions)
 
         if not raven_table:
-            return preds, probs, boxes
+            return ret
 
         time_shift = 0
+        boxes = ret[2]
         frames = []
         for b in boxes:
             df = convert_to_raven_selection_table(b, time_shift, img_height=spectrogram[0].shape[1])
@@ -295,7 +296,7 @@ class YOLOMultiLabelClassifier:
         df.reset_index(inplace=True, names="Selection")
         df["Selection"] += 1 # start from 1
         df.to_csv(f"{os.path.splitext(file_path)[0]}.Table.1.selections.predicted.txt", sep="\t", index=False)
-        return preds, probs, boxes
+        return ret
     
     def filter_meagre_too_low(self, results, img_height):
         if len(results) == 0:
@@ -314,7 +315,7 @@ class YOLOMultiLabelClassifier:
             result.boxes = result.boxes[list(map(should_keep, result.boxes))]
         return results
 
-    def predict(self, input, *, save=False, batch_size=64, return_boxes=False, threshold_boxes=False):
+    def predict(self, input, *, save=False, batch_size=64, return_boxes=False, threshold_boxes=False, return_box_predictions=False):
         if isinstance(input, np.ndarray) and input.ndim > 3 or isinstance(input, list) and isinstance(input[0], np.ndarray):
             input = [spectro[...,::-1] for spectro in input]
         
@@ -341,10 +342,22 @@ class YOLOMultiLabelClassifier:
                     continue
                 thresholds = np.array(list(map(lambda x: self.thresholds[self.label_indices[x]], box[:, -2])))
                 boxes[i] = box[box[:, -1].astype('float') > thresholds]
-        
+
+        return_value = (np.array(predictions), np.array(probabilities))
         if return_boxes:
-            return np.array(predictions), np.array(probabilities), boxes
-        return np.array(predictions), np.array(probabilities)
+            return_value = return_value + (boxes,)
+
+        if return_box_predictions:
+            box_predictions = []
+            for box in boxes:
+                for b in box:
+                    one_hot = np.zeros((len(self.label_indices),))
+                    one_hot[self.label_indices[b[-2]]] = 1
+                    box_predictions.append(one_hot)
+            box_predictions = np.array(box_predictions) if len(box_predictions) > 0 else np.zeros((1, len(self.label_indices)))
+            return_value = return_value + (box_predictions,)
+
+        return return_value
     
 if __name__ == '__main__':
     model_path = "YOLO/runs/detect/trainMPS_additional/weights"
