@@ -1,2 +1,11 @@
 # Argyrosomus
-Recognition of fish sounds in tagus river
+This project compares two methods (CNN and YOLO) to recognize and quantify fish vocalizations in the Tagus estuary. 
+
+The project has several components:
+- `CNN` all code related to the CNN method for classification of fish sounds. For further information about the component, refer to `CNN/README.md`.
+- `YOLO` all code related to the YOLO method for classification as well as object detection of fish sounds. For further information about the component, refer to `YOLO/README.md`.
+- `analyze.py` contains methods to analyze years of data using either `CNN` or `YOLO` as underlying classifiers. It works by first inferring all `.wav` files using the classifier and caching the results. It then creates plots from these results. This approach is taken so different analysis can be run without having to re-classify audio, which takes a lot of time.
+- `quantification.py` provides several methods to quantify fish vocalizations of which simple `Classify and Count` (classify all examples and count them) emerged as the best. It allows for counting fish sounds and calculating a ratio between them. Furthermore, it contains evaluation methods to statistically evaluate the error in quantifications, mainly by using bootstrapping.
+- `utils.eval.py` contains several methods to plot and evaluate the classification methods (YOLO or CNN). 
+
+
