@@ -1,0 +1,5 @@
+Selection	View	Channel	Begin Time (s)	End Time (s)	Low Freq (Hz)	High Freq (Hz)	category	confidence
+10	Spectrogram 1	1	143.270007360	143.743470030	49.763	329.384	lt	0.59935695
+13	Spectrogram 1	1	244.429168000	244.595997120	165.740	845.511	m	0.6410016
+24	Spectrogram 1	1	557.308491758	558.137652223	26.066	395.735	lt	0.6242029
+42	Spectrogram 1	1	406.542869006	406.912494755	54.502	270.142	lt	
