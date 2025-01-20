@@ -316,7 +316,8 @@ if __name__ == '__main__':
     args = parse_args()
     in_path = '/Users/I538904/Desktop/convert_to_wav/wav'
     out_path = 'data/analyzed'
-    # infer_all(in_path, out_path)
+    #infer_all(in_path, out_path)
+    # infer(args, path=f"{in_path}/20170419", out_path=out_path,skip_existing=False)
 
     # analyze_all(out_path)
 

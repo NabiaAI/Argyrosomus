@@ -9,7 +9,6 @@ labels/
 images/
 augmented_labels/
 augmented/
-audio/
 gradio_examples/
 zip.sh
 src.zip

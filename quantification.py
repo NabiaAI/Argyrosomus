@@ -113,8 +113,12 @@ def bootstrap_error(preds: np.ndarray, targets: np.ndarray, which: list[int], co
         sample_idx = np.random.choice(preds.shape[0], size=preds.shape[0], replace=True, p=p)
         errors[i] = count_fn(preds[sample_idx]) - true_counter(targets[sample_idx])
         counts[i] = count_fn(preds[sample_idx])
-        errors_ratio[i] = ratio(preds[sample_idx], count_fn=count_fn) - ratio(targets[sample_idx], count_fn=true_counter)
-        ratios[i] = ratio(preds[sample_idx], count_fn=count_fn)
+        if len(which) != 2:
+            errors_ratio[i] = np.nan
+            ratios[i] = np.nan
+        else:
+            errors_ratio[i] = ratio(preds[sample_idx], count_fn=count_fn) - ratio(targets[sample_idx], count_fn=true_counter)
+            ratios[i] = ratio(preds[sample_idx], count_fn=count_fn)
 
     if plot:
         plt.hist(errors, bins=50, density=False, label="Histogram")
@@ -160,9 +164,12 @@ def run_count_method(val_preds, val_targets, test_preds, test_targets, which_rat
     print(f"    with average test error over {n_test} resamples {count_err[0]} ({count_err[2] * 100}%)", )
 
     for which in which_ratios:
+        _, (r_err, _, rel_r_err, _, _) = bootstrap_error(val_preds, val_targets, which, count_fn, plot=plot)
+        _, ratio_err = bootstrap_error(test_preds, test_targets, which, count_fn, n=n_test)
+
         true_ratio = ratio(test_targets, which=which, count_fn=true_counter)
         cc_ratio = ratio(test_preds, which=which, count_fn=count_fn)
-        print(f"ratio (idx:{which[0]} / idx:{which[2]}) errors measured from VAL : {cc_ratio:.3f} ")
+        print(f"ratio (idx:{which[0]} / idx:{which[1]}) errors measured from VAL : {cc_ratio:.3f} ")
         print(f"               ±{r_err:.3f} (±{rel_r_err:.2%}%) MEASURED")
         print(f"                      (±{propagate_ratio_error(rel_err[0], rel_err[1]):.2%}%) PROPAGATED from rel count errors")
         print(f"    with test error", np.abs(true_ratio - cc_ratio), f"(pred. ratio {cc_ratio} of {true_ratio} true ratio)")

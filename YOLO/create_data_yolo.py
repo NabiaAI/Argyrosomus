@@ -23,9 +23,9 @@ stride = 5  # stride in seconds
 
 # Define the mapping of labels to indices
 CATEGORY_MAPPING = {
-    "w": 0,
+    "lt": 0,
     "m": 1,
-    "lt": 2
+    "w": 2
 }
 
 def normalize_audio(audio_data):
@@ -80,7 +80,8 @@ def append_audios(audio_folder, save=False, normalize=False):
     
 
 # Function to save spectrogram without bounding boxes
-def save_spectrogram(segment, sr, *, file_name="", index=None, as_array = False, save_audio_path = None, averaging_period_s=None, n_fft=256, hop_length=64, image_folder="."):
+def save_spectrogram(segment, sr, *, file_name="", index=None, as_array = False, save_audio_path = None, averaging_period_s=None, 
+                     n_fft=256, hop_length=64, frequency_limit_Hz=1000, image_folder="."):
     if sr != 4000:
         segment = librosa.resample(segment, orig_sr=sr, target_sr=4000)
         sr = 4000
@@ -90,8 +91,7 @@ def save_spectrogram(segment, sr, *, file_name="", index=None, as_array = False,
     S_db = librosa.amplitude_to_db(D, ref=np.max)
 
     # Define the frequency range to display
-    freq_limit = 1000 # Hz
-    max_freq_bin = min(D.shape[0], int(freq_limit / (sr / n_fft)))
+    max_freq_bin = min(D.shape[0], int(frequency_limit_Hz / (sr / n_fft)))
     S_db_clipped = S_db[:max_freq_bin, :]
     # flip the image vertically so low frequencies are at the bottom
     S_db_flipped = S_db_clipped[::-1, :]  
@@ -107,12 +107,12 @@ def save_spectrogram(segment, sr, *, file_name="", index=None, as_array = False,
     if as_array:
         output = io.BytesIO()
     else: 
-        output = os.path.join(image_folder, f"{file_name}_segment_{index + 1}.png")
+        output = os.path.join(image_folder, f"{file_name}{segment_appendix}.png")
     plt.imsave(output, S_db_flipped, cmap='magma')
 
     if save_audio_path:
         # Save the audio segment as a wav file
-        wav.write(os.path.join(save_audio_path, f"{file_name}_segment_{index + 1}.wav"), sr, segment)
+        wav.write(os.path.join(save_audio_path, f"{file_name}{segment_appendix}.wav"), sr, segment)
 
     if as_array:
         output.seek(0)
@@ -139,7 +139,6 @@ def add_bounding_boxes(image_path, segment_start_time, segment_duration, sr, sel
     # Prepare bounding box data for YOLO format text file
     bounding_boxes = []
     per_image_labels = [0, 0, 0]
-    classical_mapping = {"lt": 0, "m": 1, "w": 2}
 
     # Draw bounding boxes and labels
     for _, row in segment_selections.iterrows():
@@ -147,12 +146,11 @@ def add_bounding_boxes(image_path, segment_start_time, segment_duration, sr, sel
         low_freq, high_freq = row['Low Freq (Hz)'], row['High Freq (Hz)']
         category = row['category']
 
-        per_image_labels[classical_mapping[category]] = 1
-
         # Get the category index
-        category_index = CATEGORY_MAPPING.get(category)
-        if category_index is None:
-            continue  # Skip if the category is not recognized
+        category_index = CATEGORY_MAPPING[category]
+
+        # for creating list
+        per_image_labels[category_index] = 1
 
         # Convert time to X-axis coordinates
         image_width, image_height = image.size
@@ -403,14 +401,15 @@ def create_spectrograms(audio_folder, image_folder, labels_folder, segment_folde
                                list_path, segment_audio_path=segment_folder)
             images_generated += 1
 
+def create_long_term_spectrogram(base_path, day):
+    n_fft, hop_length = 1024, 512 # PARAMETERS ONLY FOR LONG-TERM SPECTROGRAM (hop length = 50% overlap)
+    sr, audio = append_audios(os.path.join(base_path, day), normalize=True)
+    save_spectrogram(audio, sr, file_name=f"data/{day}_long-term", averaging_period_s=60, n_fft=n_fft, hop_length=hop_length)
 
 if __name__ == '__main__':
 
     # create long-term spectrogram
-    # day = "20170419"
-    # n_fft, hop_length = 1024, 512 # PARAMETERS ONLY FOR LONG-TERM SPECTROGRAM (hop length = 50% overlap)
-    # sr, audio = append_audios(f"/Users/I538904/Desktop/convert_to_wav/wav/{day}", normalize=True)
-    # save_spectrogram(audio, sr, file_name=f"{day}_long-term", averaging_period_s=60, n_fft=n_fft, hop_length=hop_length)
+    create_long_term_spectrogram("/Users/I538904/Desktop/convert_to_wav/wav/", "20170419")
 
     # cut file to specific time and move predictions
     # start_time = 0
@@ -430,23 +429,9 @@ if __name__ == '__main__':
     #     latest_selection_end_time = selections['End Time (s)'].max() + 0.5 # add 500 ms
     #     cut_audio_file(os.path.join(audio_folder, audio_file_name), 0, latest_selection_end_time, save_base_path="data/audio2")
 
-    # files = [
-    #     # autumn
-    #     ("/Users/I538904/Desktop/convert_to_wav/wav/20161117/0757_.wav", 8),
-    #     ("/Users/I538904/Desktop/convert_to_wav/wav/20161117/1408_.wav", 15.75),
-    #     ("/Users/I538904/Desktop/convert_to_wav/wav/20161117/2008_.wav", 21),
-    #     # winter 
-    #     ("/Users/I538904/Desktop/convert_to_wav/wav/20170116/0726_.wav", 8),
-    #     ("/Users/I538904/Desktop/convert_to_wav/wav/20170116/1526_.wav", 16),
-    #     ("/Users/I538904/Desktop/convert_to_wav/wav/20170116/1926_.wav", 21),
-    # ]
-    # for p, h in files:
-    #     base = f"./data/validation/{p.split('/')[-2]}_{p.split('/')[-1].split('.')[0]}" 
-    #     cut_audio_file(p, h*3600, h*3600+10*60,save_base_path=base)
-
     # create data for training (including split train and validation)
     list_path = "./data/train/list.txt"
-    audio_folder = "./data/train/audio"
+    audio_folder = "./labeled_data/train/audio"
     image_folder = "./data/train/images"
     labels_folder = "./data/train/labels"
     segment_folder = './data/train/audio_segments'
@@ -455,7 +440,7 @@ if __name__ == '__main__':
 
     # create data only for validation/testing
     list_path = "./data/validation/list.txt"
-    audio_folder = "./data/validation/audio"
+    audio_folder = "./labeled_data/validation/audio"
     image_folder = "./data/validation/images"
     labels_folder = "./data/validation/labels"
     segment_folder = './data/validation/audio_segments'

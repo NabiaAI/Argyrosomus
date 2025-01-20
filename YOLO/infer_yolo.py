@@ -80,7 +80,6 @@ def segment_audios(file_paths, segment_duration=5, stride=None, extract_timestam
     return time_stamps, all_segments, sample_rate
 
 def detection_to_cls_results(preds, thresholds=None):
-    cls_map = {0: 2, 1:1, 2:0} # other way round in cls labels
     converted_results = []
     converted_probs = []
     for pred in preds:
@@ -89,9 +88,9 @@ def detection_to_cls_results(preds, thresholds=None):
         for b in pred.boxes:
             cls = int(b.cls[0])
             conf = b.conf[0]
-            one_hot[cls_map[cls]] = 1
-            if conf > prob[cls_map[cls]]: # take the highest confidence (better to optimize threshold)
-                prob[cls_map[cls]] = conf
+            one_hot[cls] = 1
+            if conf > prob[cls]: # take the highest confidence (better to optimize threshold)
+                prob[cls] = conf
         converted_results.append(one_hot)
         converted_probs.append(prob)
     converted_results = np.array(converted_results)
@@ -187,7 +186,7 @@ def audios_to_spectrograms(audios: list[np.array], srs, target_duration, executo
     spectrogram_list = np.array(spectrogram_list)[idx]
     return spectrogram_list
 
-def load_cached(input, cache_path=None, min_duration=0.1, target_duration=5, no_labels=False, sr=None, executor=None):
+def load_cached(input, cache_path=None, min_duration_s=0.1, target_duration_s=5, no_labels=False, sr=None, executor=None):
     if cache_path:
         try:
             if no_labels:
@@ -205,9 +204,9 @@ def load_cached(input, cache_path=None, min_duration=0.1, target_duration=5, no_
         srs = [sr] * len(input)
         labels = None
 
-    audio_list, labels, srs = filter_too_short(audio_list, labels, srs, min_duration)
+    audio_list, labels, srs = filter_too_short(audio_list, labels, srs, min_duration_s)
     labels = np.array(labels, dtype='int') if labels is not None else None
-    spectrogram_list = audios_to_spectrograms(audio_list, srs, target_duration, executor=executor)
+    spectrogram_list = audios_to_spectrograms(audio_list, srs, target_duration_s, executor=executor)
 
     if cache_path:
         os.makedirs(cache_path, exist_ok=True)
