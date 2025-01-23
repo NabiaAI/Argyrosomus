@@ -10,6 +10,7 @@ from sklearn.metrics import multilabel_confusion_matrix, roc_curve, auc
 np.random.seed(0)
 
 def plot_validation_output(dates, sums, true_counts, save_path):
+    plt.rcdefaults()
     plt.figure(figsize=(14,6))
     true_counts = true_counts - 0.5 # to make the plot more readable
     for num, color in zip([0, 1, 2], ['orange', 'green', 'red']):
@@ -50,6 +51,7 @@ def plot_roc_curves(y_true, y_probs, labels, path):
     plt.close()
 
 def evaluate_results(all_preds, all_targets, class_labels, model_info, save_matrix_path):
+    plt.rcdefaults()
     # accuacy
     accuracy = (all_preds == all_targets).mean()
     print(f'Accuracy: {accuracy:.5f}')
@@ -70,7 +72,7 @@ def evaluate_results(all_preds, all_targets, class_labels, model_info, save_matr
         plt.figure(figsize=(10, 8))
         sns.heatmap(matrix, annot=True, fmt='d', cmap='Blues', vmin=0, vmax=600, cbar=False)
         plt.xlabel('Predicted')
-        plt.ylabel('Actual')
+        plt.ylabel('True')
         # plt.title(f'Confusion Matrix for Label {class_labels[i]} - {output_string}\n{model_info}')
         try:
             plt.savefig(os.path.join(save_matrix_path, f'yolo_cm_label_{class_labels[i]}.pdf'), bbox_inches='tight', pad_inches=0)
@@ -102,12 +104,14 @@ def print_combined_multilabel_confusion_matrix(path, y_true, y_pred, labels_idx,
             new_label = ['-']
         label_combinations[i] = ','.join(new_label)
 
+    plt.rcdefaults()
+    plt.rcParams.update({'font.size': 14})
     plt.figure(figsize=(10, 8))
     ax = sns.heatmap(combined_cm, annot=True, fmt='d', cmap='Blues', 
                         xticklabels=label_combinations, yticklabels=label_combinations, vmax=300, vmin=0, cbar=False)
     ax.tick_params(axis='both', which='major', labelsize=14)
     plt.xlabel('Predicted')
-    plt.ylabel('Actual')
+    plt.ylabel('True')
     if title is not None:
         plt.title(title)
     try:

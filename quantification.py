@@ -155,7 +155,7 @@ def run_count_method(val_preds, val_targets, test_preds, test_targets, which_rat
     true_counter = std_count
     which_counting = list(range(test_targets.shape[1]))
     (abs_err, std_err, rel_err, std_rel_err, rmse), (r_err, _, rel_r_err, _, _) = bootstrap_error(val_preds, val_targets, which_counting, count_fn, plot=plot)
-    print(f"count (m, w) errors measured from VAL :")
+    print(f"count (lt, m, w) errors measured from VAL :")
     [print("    ", s) for s in [f'±{e:.2f} 95%CI[{e-2*std_e:.2f},{e+2*std_e:.2f}] (±{rel_e:.2%} 95%CI[{rel_e-2*std_rel_e:.2%},{rel_e+2*std_rel_e:.2%}]); RMSE {rmse:.2f}' 
                                for e, std_e, rel_e, std_rel_e, rmse in zip(abs_err, std_err, rel_err, std_rel_err, rmse)]]
     true_sums = true_counter(test_targets, which_counting)

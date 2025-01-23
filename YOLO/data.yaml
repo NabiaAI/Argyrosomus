@@ -4,4 +4,4 @@ train: to_train/train
 val: to_train/valid
 
 nc: 3  # number of classes
-names: ['w', 'm', 'lt']  # class names
+names: ['lt', 'm', 'w']  # class names

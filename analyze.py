@@ -31,7 +31,7 @@ def infer_cnn(args, audios, sample_rate):
     return preds,outs
 
 def infer_yolo(audios, sample_rate):
-    model = YOLOMultiLabelClassifier("YOLO/runs/detect/trainMPS_additional/weights",)
+    model = YOLOMultiLabelClassifier("YOLO/runs/detect/train_final/weights",)
     audios = [normalize_audio(audio) for audio in audios]
     # persistant executor to speed up spectrogram creation
     executor = ProcessPoolExecutor(max_workers=os.cpu_count()-1)
@@ -143,7 +143,8 @@ def plot_analysis(all_ratios, all_m_w_counts, n_boot, batch_number, slope, slope
     smooth_and_plot(plt_ratios[:,0], plt_lt_m_w[:,1], window_size, None, 'green')
     smooth_and_plot(plt_ratios[:,0], plt_lt_m_w[:,2], window_size, None, 'red')
 
-    ax2.set_ylabel('Counts'), ax2.legend(loc='upper left')
+    ax2.set_ylabel('Counts'), ax2.legend(fontsize='small')
+    plt.grid(axis='x', alpha=0.2)
 
     #plt.xticks(np.arange(batch_number), np.arange(batch_number) + 2015)
     CI_str = f"(95%CI: [{slope_ci[0]:.3f}, {slope_ci[1]:.3f}])"if n_boot > 1 else ""
@@ -314,11 +315,11 @@ def parse_args():
 if __name__ == '__main__':
     np.random.seed(42)
     args = parse_args()
-    in_path = '/Users/I538904/Desktop/convert_to_wav/wav'
+    in_path = 'convert_to_wav/wav'
     out_path = 'data/analyzed'
     #infer_all(in_path, out_path)
-    # infer(args, path=f"{in_path}/20170419", out_path=out_path,skip_existing=False)
+    infer(args, path=f"{in_path}/20210707", out_path=out_path,skip_existing=True)
 
-    # analyze_all(out_path)
+    analyze_all(out_path)
 
-    analyze_against_validation_data('YOLO/data/validation/audio', skip_existing=True)
+    # analyze_against_validation_data('YOLO/data/validation/audio', skip_existing=True)

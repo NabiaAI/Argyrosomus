@@ -326,7 +326,7 @@ class YOLOMultiLabelClassifier:
         for i in range(n_batches):
             batch = input[i * batch_size:(i + 1) * batch_size]
             results = self._model.predict(batch, device=self.device, save=save, conf=self.bounding_box_threshold, iou=self.iou,
-                                          imgsz=self.imgsz,verbose=False)# half=True)
+                                          imgsz=self.imgsz,verbose=False, show_labels=False, show_conf=False, line_width=1)# half=True)
             results = [result.cpu().numpy() for result in results]
             results = self.filter_meagre_too_low(results, img_height=batch[0].shape[0])
             preds, probs = detection_to_cls_results(results, self.thresholds)
@@ -359,7 +359,7 @@ class YOLOMultiLabelClassifier:
         return return_value
     
 if __name__ == '__main__':
-    model_path = "YOLO/runs/detect/trainMPS_additional/weights"
+    model_path = "YOLO/runs/detect/train_final/weights"
     model = YOLOMultiLabelClassifier(model_path,)
 
     base = "YOLO/data/validation/"

@@ -409,7 +409,8 @@ def create_long_term_spectrogram(base_path, day):
 if __name__ == '__main__':
 
     # create long-term spectrogram
-    create_long_term_spectrogram("/Users/I538904/Desktop/convert_to_wav/wav/", "20170419")
+    create_long_term_spectrogram("../convert_to_wav/wav/", "20170419")
+    exit()
 
     # cut file to specific time and move predictions
     # start_time = 0

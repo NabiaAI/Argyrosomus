@@ -9,13 +9,16 @@ sys.path.append('macls')
 import quantification as quant
 import utils_eval as eval
 
-model_path = "runs/detect/trainMPS_additional/weights"
+model_path = "runs/detect/train_final/weights"
+device = 'mps'
+save_examples = True
 bb_threshold = 0.25
+thresholds = None # None = use saved thresholds # [0.25585734844207764, 0.6342101693153381, 0.28556814789772034] [0.2535114586353302, 0.2733498811721802, 0.28548818826675415]
 
 def run_on_list(test_list, output_path):
-    model = YOLOMultiLabelClassifier(model_path, bounding_box_threshold=bb_threshold)
+    model = YOLOMultiLabelClassifier(model_path, bounding_box_threshold=bb_threshold, thresholds=thresholds, device=device)
     spectrograms, labels = load_cached(test_list) 
-    preds, probs, boxes = model.predict(spectrograms, save=True, return_boxes=True)
+    preds, probs, boxes = model.predict(spectrograms, save=save_examples, return_boxes=True)
     
     idx = np.arange(len(preds)).reshape((-1, 1))
     np.savetxt('runs/labels.txt', np.hstack((idx, labels)), fmt='%d')
@@ -31,7 +34,6 @@ def run_on_list(test_list, output_path):
 
 
 if __name__ == '__main__':
-    #thresholds =  [0.2650397717952728, 0.5434091091156006, 0.3506118953227997] # train_list
     print("Evaluating YOLO model on validation split of training data")
     test_list = "data/train/list_valid.txt"
     run_on_list(test_list, "../data/output")
