@@ -1,6 +1,7 @@
 import sys
 import os
 import shutil
+import h5py
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(current_dir, '..', '..', '..'))
 sys.path.append(project_root)
@@ -31,24 +32,32 @@ def infer_cnn(args, audios, sample_rate):
     return preds,outs
 
 def infer_yolo(audios, sample_rate):
-    model = YOLOMultiLabelClassifier("YOLO/final_model/weights",)
     audios = [normalize_audio(audio) for audio in audios]
     # persistant executor to speed up spectrogram creation
     executor = ProcessPoolExecutor(max_workers=os.cpu_count()-1)
     # bach inference
-    batch_size = 1024
+    batch_size = 1024 + 512
     n_batches = math.ceil(len(audios) / batch_size)
     preds = []
     boxes = []
     box_preds = []
     for i in tqdm(range(n_batches)):
         batch = audios[i * batch_size:(i + 1) * batch_size]
-        batch = load_cached(batch, cache_path=None, sr=sample_rate, no_labels=True, executor=executor)
-        batch_preds, _, batch_boxes, box_preds_batch = model.predict(batch, save=False, batch_size=64, return_boxes=True, return_box_predictions=True)
+        batch = load_cached(batch, cache_path=None, sr=sample_rate, no_labels=True, executor=executor, use_tqdm=False)
+        batch_preds, _, batch_boxes, box_preds_batch = yolo_model.predict(batch, save=False, batch_size=64, return_boxes=True, return_box_predictions=True)
         preds.extend(batch_preds)
         boxes.extend(batch_boxes)
         box_preds.extend(box_preds_batch)
     return np.array(preds), boxes, box_preds_batch
+
+def save_array_list(path, arrays: list[np.ndarray]):
+    arrays_with_idx = []
+    for i, array in enumerate(arrays):
+        if array.size == 0:
+            continue
+        arrays_with_idx.append(np.hstack([np.ones((array.shape[0], 1)) * i, array]))
+    array_with_idx = np.vstack(arrays_with_idx, dtype=np.float32)
+    np.savez_compressed(path, boxes_with_segment_idx=array_with_idx)
 
 def infer(args, path: str, out_path, skip_existing=True, save_box_preds=False):
     if os.path.isfile(path):
@@ -68,7 +77,7 @@ def infer(args, path: str, out_path, skip_existing=True, save_box_preds=False):
             return
     paths = sorted(paths)
     
-    out_times, out_preds, out_boxes, out_bpreds = f'{out_path}/{name}_times.npy', f'{out_path}/{name}_preds.npy', f'{out_path}/{name}_boxes.npz', f'{out_path}/{name}_boxpreds.npy'
+    out_times, out_preds, out_boxes, out_bpreds = f'{out_path}/{name}_times.npz', f'{out_path}/{name}_preds.npz', f'{out_path}/{name}_boxes.npz', f'{out_path}/{name}_boxpreds.npy'
     if os.path.exists(out_times) and os.path.exists(out_preds) and skip_existing:
         print(f"Skipping {name} as output files already exist")
         return
@@ -78,9 +87,9 @@ def infer(args, path: str, out_path, skip_existing=True, save_box_preds=False):
 
     #preds, boxes = infer_cnn(args, audios, sample_rate)
     preds, boxes, box_preds = infer_yolo(audios, sample_rate)
-    np.savez(out_boxes, *boxes)
-    np.save(out_times, times)
-    np.save(out_preds, preds)
+    save_array_list(out_boxes, boxes)
+    np.savez_compressed(out_times, times=times)
+    np.savez_compressed(out_preds, preds=preds)
     if save_box_preds:
         np.save(out_bpreds, box_preds)
 
@@ -155,8 +164,8 @@ def plot_analysis(all_ratios, all_m_w_counts, n_boot, batch_number, slope, slope
 
 def analyze(in_path, n_boot=1, ):
     print(f"Analyzing {in_path}")
-    preds = np.load(f'{in_path}_preds.npy') # shape (n, 3)
-    times = np.load(f'{in_path}_times.npy') # shape (n,) in seconds of the day
+    preds = np.load(f'{in_path}_preds.npz')['preds'] # shape (n, 3)
+    times = np.load(f'{in_path}_times.npz')['times'] # shape (n,) in seconds of the day
     valid_times = (0 <= times) & (times < 23 * 3600 + 59 * 60 + 59) # only keep times within a day
     preds = preds[valid_times]
     times = times[valid_times]
@@ -243,8 +252,8 @@ def analyze_all(in_path, load_labels=False):
         assert runs == 0, "Only one level is supported"
         files = sorted(files)
         for f in files:
-            if f.endswith('_preds.npy'):
-                f: str = f.replace('_preds.npy', '')
+            if f.endswith('_preds.npz'):
+                f: str = f.replace('_preds.npz', '')
                 p = os.path.join(root, f)
                 counts = analyze(p)
                 dates.append(f)
@@ -269,13 +278,13 @@ def analyze_against_validation_data(validation_path, skip_existing=False):
     box_preds_sums = []
     for f in sorted(os.listdir(dest)):
         p = os.path.join(dest, f)
-        if f.endswith('_preds.npy'):
-            preds = np.load(p) # shape (n, 3)
-            box_preds = np.load(f"{p[:p.index('_preds.npy')]}_boxpreds.npy")
+        if f.endswith('_preds.npz'):
+            preds = np.load(p)['preds'] # shape (n, 3)
+            box_preds = np.load(f"{p[:p.index('_preds.npz')]}_boxpreds.npy")
             sums.append(preds.sum(axis=0))
             box_preds_sums.append(box_preds.sum(axis=0))
 
-            raven_file = f'{p[:p.index('_preds.npy')]}.Table.1.selections.txt'
+            raven_file = f'{p[:p.index('_preds.npz')]}.Table.1.selections.txt'
             assert os.path.exists(raven_file), f"Labels not found for {p}"
             segment_counts, total_counts = get_true_counts(raven_file)
             true_counts.append(segment_counts), true_counts_total.append(total_counts)
@@ -315,10 +324,11 @@ def parse_args():
 if __name__ == '__main__':
     np.random.seed(42)
     args = parse_args()
+    yolo_model = YOLOMultiLabelClassifier("YOLO/final_model/weights",)
     in_path = 'convert_to_wav/wav'
     out_path = 'data/analyzed'
-    #infer_all(in_path, out_path)
-    infer(args, path=f"{in_path}/20210707", out_path=out_path,skip_existing=True)
+    infer_all(in_path, out_path)
+    #infer(args, path=f"{in_path}/20210707", out_path=out_path,skip_existing=True)
 
     analyze_all(out_path)
 

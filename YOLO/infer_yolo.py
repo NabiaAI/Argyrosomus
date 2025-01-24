@@ -25,12 +25,11 @@ def x_coord_to_time(coord):
     return coord / (sr / hop_length) # coord * (sr / hop_length)
     
 
-def convert_to_raven_selection_table(input_array, time_shift=0, img_height=64):
+def convert_to_raven_selection_table(input_array, names, time_shift=0, img_height=64):
     img_height = 64 # RESULTS FROM SPECTROGRAM CREATION 
     data = []
     for idx, row in enumerate(input_array):
         x1, y1, x2, y2, category, conf = row
-        x1, y1, x2, y2, conf = map(float, [x1, y1, x2, y2, conf]) # Convert strings to floats
 
         # Calculate the desired output columns
         begin_time = x_coord_to_time(x1) + time_shift
@@ -46,7 +45,7 @@ def convert_to_raven_selection_table(input_array, time_shift=0, img_height=64):
             end_time,
             low_freq,
             high_freq,
-            category,
+            names[int(category)],
             conf
         ])
 
@@ -163,7 +162,7 @@ def load_list(input):
         print(f"WARNING: Skipped {skipped} files which did not exist")
     return audio_list, labels_list, srs
 
-def audios_to_spectrograms(audios: list[np.array], srs, target_duration, executor=None): # TODO: split audio if its too long
+def audios_to_spectrograms(audios: list[np.array], srs, target_duration, executor=None, use_tqdm=True): # TODO: split audio if its too long
     spectrogram_list = []
     idxs = []
 
@@ -173,7 +172,8 @@ def audios_to_spectrograms(audios: list[np.array], srs, target_duration, executo
         close_executor = True
 
     futures = {executor.submit(numpy_audio_to_spectrogram, audio, sr, target_duration): idx for idx, (audio, sr) in enumerate(zip(audios, srs, strict=True))}
-    for future in tqdm(as_completed(futures), total=len(futures)):
+    iterator = tqdm(futures, total=len(futures)) if use_tqdm else futures
+    for future in iterator:
         idx = futures[future]
         spectrogram = future.result()
         spectrogram_list.append(spectrogram)
@@ -186,7 +186,7 @@ def audios_to_spectrograms(audios: list[np.array], srs, target_duration, executo
     spectrogram_list = np.array(spectrogram_list)[idx]
     return spectrogram_list
 
-def load_cached(input, cache_path=None, min_duration_s=0.1, target_duration_s=5, no_labels=False, sr=None, executor=None):
+def load_cached(input, cache_path=None, min_duration_s=0.1, target_duration_s=5, no_labels=False, sr=None, executor=None, use_tqdm=True):
     if cache_path:
         try:
             if no_labels:
@@ -206,7 +206,7 @@ def load_cached(input, cache_path=None, min_duration_s=0.1, target_duration_s=5,
 
     audio_list, labels, srs = filter_too_short(audio_list, labels, srs, min_duration_s)
     labels = np.array(labels, dtype='int') if labels is not None else None
-    spectrogram_list = audios_to_spectrograms(audio_list, srs, target_duration_s, executor=executor)
+    spectrogram_list = audios_to_spectrograms(audio_list, srs, target_duration_s, executor=executor, use_tqdm=use_tqdm)
 
     if cache_path:
         os.makedirs(cache_path, exist_ok=True)
@@ -220,8 +220,7 @@ def load_cached(input, cache_path=None, min_duration_s=0.1, target_duration_s=5,
 def get_boxes(results):
     boxes = []
     for result in results:
-        cls = np.array([result.names[c] for c in result.boxes.cls])
-        box_list = np.hstack([result.boxes.xyxy, cls.reshape((-1, 1)), result.boxes.conf.reshape((-1, 1))])
+        box_list = np.hstack([result.boxes.xyxy, result.boxes.cls.reshape((-1, 1)), result.boxes.conf.reshape((-1, 1))])
         boxes.append(box_list)
     return boxes
 
@@ -283,7 +282,7 @@ class YOLOMultiLabelClassifier:
         boxes = ret[2]
         frames = []
         for b in boxes:
-            df = convert_to_raven_selection_table(b, time_shift, img_height=spectrogram[0].shape[1])
+            df = convert_to_raven_selection_table(b, self._model.names, time_shift=time_shift, img_height=spectrogram[0].shape[1])
             if len(df) == 0:
                 time_shift += segment_duration
                 continue
@@ -339,7 +338,7 @@ class YOLOMultiLabelClassifier:
             for i, box in enumerate(boxes):
                 if len(box) == 0:
                     continue
-                thresholds = np.array(list(map(lambda x: self.thresholds[self.label_indices[x]], box[:, -2])))
+                thresholds = np.array(list(map(lambda x: self.thresholds[int(x)], box[:, -2])))
                 boxes[i] = box[box[:, -1].astype('float') > thresholds]
 
         return_value = (np.array(predictions), np.array(probabilities))
@@ -351,7 +350,7 @@ class YOLOMultiLabelClassifier:
             for box in boxes:
                 for b in box:
                     one_hot = np.zeros((len(self.label_indices),))
-                    one_hot[self.label_indices[b[-2]]] = 1
+                    one_hot[int(b[-2])] = 1
                     box_predictions.append(one_hot)
             box_predictions = np.array(box_predictions) if len(box_predictions) > 0 else np.zeros((1, len(self.label_indices)))
             return_value = return_value + (box_predictions,)
@@ -362,11 +361,10 @@ if __name__ == '__main__':
     model_path = "YOLO/final_model/weights"
     model = YOLOMultiLabelClassifier(model_path,)
 
-    base = "YOLO/data/validation/"
-    for f in sorted(os.listdir(base)):
-        if f.endswith(".wav"):
-            input_file = os.path.join(base, f)
-            _, _, boxes = model.predict_file(input_file, save=False, raven_table=True, threshold_boxes=True)
-    # input_file = "YOLO/data/validation/20161117_0757-28800-29400.wav" # "/Users/I538904/Desktop/convert_to_wav/wav/20170420/2353_.wav"
-    # _, _, boxes = model.predict_file(input_file, save=False, raven_table=True, threshold_boxes=True)
-    np.savez("runs/boxes.npz", *boxes)
+    # base = "YOLO/data/validation/"
+    # for f in sorted(os.listdir(base)):
+    #     if f.endswith(".wav"):
+    #         input_file = os.path.join(base, f)
+    #         _, _, boxes = model.predict_file(input_file, save=False, raven_table=True, threshold_boxes=True)
+    input_file = "convert_to_wav/wav/20160508/0301_.wav"
+    _, _, boxes = model.predict_file(input_file, save=False, raven_table=True, threshold_boxes=True)
