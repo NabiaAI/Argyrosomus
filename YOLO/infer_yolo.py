@@ -359,7 +359,7 @@ class YOLOMultiLabelClassifier:
         return return_value
     
 if __name__ == '__main__':
-    model_path = "YOLO/runs/detect/train_final/weights"
+    model_path = "YOLO/final_model/weights"
     model = YOLOMultiLabelClassifier(model_path,)
 
     base = "YOLO/data/validation/"

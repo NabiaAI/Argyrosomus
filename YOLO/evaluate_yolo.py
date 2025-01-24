@@ -9,7 +9,7 @@ sys.path.append('macls')
 import quantification as quant
 import utils_eval as eval
 
-model_path = "runs/detect/train_final/weights"
+model_path = "final_model/weights"
 device = 'mps'
 save_examples = True
 bb_threshold = 0.25
