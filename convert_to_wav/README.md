@@ -8,6 +8,8 @@ You can also change the folders in the script.
 
 The output `.wav` files will be single-channel and sampled to 4000Hz. 
 
+To install requirements, simply `pip install -r requirements.txt`. In case of any errors: this script was developed with Python 3.12.
+
 ## Adjusting `file_info.csv`
 
 Down below, please find an example of `file_info.csv`. The `start_date` and `end_date` columns in ISO format (`YYYYMMDD`) specify for what dates of `.dat` files the row applies. 

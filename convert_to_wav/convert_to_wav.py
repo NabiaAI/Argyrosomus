@@ -2,7 +2,6 @@ import os
 import numpy as np
 import pydub
 import pandas as pd
-import time
 from tqdm import tqdm
 
 src_dir = 'dat'
@@ -17,10 +16,11 @@ assert len(file_info) > 0, "file_info.csv is empty."
 
 def gather_files(src_dir):
     files = []
-    for root, _, filenames in os.walk(src_dir):
+    for root, _, filenames in os.walk(src_dir, onerror=lambda e: print(e)):
         for filename in filenames:
             if filename.endswith('.dat'):
-                files.append(os.path.join(root, filename))
+                relative_root = os.path.relpath(root, src_dir)
+                files.append((src_dir, os.path.join(relative_root, filename)))
     return sorted(files)
 
 def get_info(filename: str):
@@ -52,7 +52,7 @@ def convert_to_wav(src, dest, orig_sampling_rate, numch, target_sampling_rate=40
 
 if __name__ == '__main__':
     files = gather_files(src_dir)
-    for file in tqdm(files):
+    for root, file in tqdm(files):
         sampling_rate, numch = get_info(file)
         if sampling_rate is None and numch is None:
             print(f"Skipping {file}. Sampling rate and number of channels not found or invalid in file_info.csv.")
@@ -64,4 +64,4 @@ if __name__ == '__main__':
             continue
         os.makedirs(os.path.dirname(dest), exist_ok=True)
 
-        convert_to_wav(file, dest, sampling_rate, numch)
+        convert_to_wav(os.path.join(root, file), dest, sampling_rate, numch)
