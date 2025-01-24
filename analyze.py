@@ -48,7 +48,7 @@ def infer_yolo(audios, sample_rate):
         preds.extend(batch_preds)
         boxes.extend(batch_boxes)
         box_preds.extend(box_preds_batch)
-    return np.array(preds), boxes, box_preds_batch
+    return np.array(preds), boxes, box_preds
 
 def save_array_list(path, arrays: list[np.ndarray]):
     arrays_with_idx = []
@@ -56,7 +56,7 @@ def save_array_list(path, arrays: list[np.ndarray]):
         if array.size == 0:
             continue
         arrays_with_idx.append(np.hstack([np.ones((array.shape[0], 1)) * i, array]))
-    array_with_idx = np.vstack(arrays_with_idx, dtype=np.float32)
+    array_with_idx = np.vstack(arrays_with_idx, dtype=np.float32) if len(arrays_with_idx) > 0 else np.array([], dtype=np.float32)
     np.savez_compressed(path, boxes_with_segment_idx=array_with_idx)
 
 def infer(args, path: str, out_path, skip_existing=True, save_box_preds=False):
