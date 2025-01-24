@@ -166,6 +166,9 @@ def analyze(in_path, n_boot=1, ):
     print(f"Analyzing {in_path}")
     preds = np.load(f'{in_path}_preds.npz')['preds'] # shape (n, 3)
     times = np.load(f'{in_path}_times.npz')['times'] # shape (n,) in seconds of the day
+    if len(preds) == 0:
+        print(f"No preds in {in_path}")
+        return np.zeros((1, 3))
     valid_times = (0 <= times) & (times < 23 * 3600 + 59 * 60 + 59) # only keep times within a day
     preds = preds[valid_times]
     times = times[valid_times]
