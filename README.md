@@ -1,5 +1,7 @@
 # Argyrosomus
-This project compares two methods (CNN and YOLO) to recognize and quantify fish vocalizations in the Tagus estuary. 
+This project compares two methods (CNN and YOLO) to recognize and quantify fish vocalizations in the Tagus estuary.
+
+The project requires Python 3.12. See `requirements.txt` for required packages.
 
 The project has several components:
 - `CNN` all code related to the CNN method for classification of fish sounds. For further information about the component, refer to `CNN/README.md`.
