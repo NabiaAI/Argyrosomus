@@ -190,7 +190,7 @@ class MAClsTrainer(object):
                     feature, labels = test_dataset[i]
                     feature = feature.numpy()
                     label_str = ' '.join(map(str, labels.tolist()))
-                    save_path = os.path.join(save_dir, '_'.join(map(str, labels.nonzero()[0].tolist())), f'{int(time.time() * 1000)}.npy').replace('\\', '/')
+                    save_path = os.path.join(save_dir, f'{int(time.time() * 1000)}.npy').replace('\\', '/')
                     os.makedirs(os.path.dirname(save_path), exist_ok=True)
                     np.save(save_path, feature)
                     f.write(f'{save_path}\t{label_str}\n')

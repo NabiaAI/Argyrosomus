@@ -6,8 +6,8 @@ from macls.utils.utils import add_arguments, print_arguments
 
 parser = argparse.ArgumentParser(description=__doc__)
 add_arg = functools.partial(add_arguments, argparser=parser)
-add_arg('configs',          str,    'configs/fish3.yml','configs')
-add_arg('save_dir',         str,    'data/aa_4s_de001_mel','save dir')
+add_arg('configs',          str,    'CNN/configs/fish3.yml','configs')
+add_arg('save_dir',         str,    'CNN/data/3fish_mel','save dir')
 args = parser.parse_args()
 print_arguments(args=args)
 
