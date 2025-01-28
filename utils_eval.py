@@ -75,7 +75,7 @@ def evaluate_results(all_preds, all_targets, class_labels, model_info, save_matr
         plt.ylabel('True')
         # plt.title(f'Confusion Matrix for Label {class_labels[i]} - {output_string}\n{model_info}')
         try:
-            plt.savefig(os.path.join(save_matrix_path, f'yolo_cm_label_{class_labels[i]}.pdf'), bbox_inches='tight', pad_inches=0)
+            plt.savefig(os.path.join(save_matrix_path, f'{model_info}_cm_label_{class_labels[i]}.pdf'), bbox_inches='tight', pad_inches=0)
         except Exception as e:
             print(f'Error: Save confusion martrix{e}')
         plt.close()

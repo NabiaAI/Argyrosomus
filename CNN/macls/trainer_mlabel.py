@@ -591,11 +591,11 @@ class MAClsTrainer(object):
         all_targets = np.vstack(all_targets)
         all_probs = np.vstack(all_probs)
 
-        print(f'Test Accuracy: {acc:.5f}')
-
 
         if save_matrix_path is not None:
             eval.plot_roc_curves(all_targets, all_probs, self.class_labels, os.path.join(save_matrix_path, 'cnn_roc_curve.pdf'))
+            eval.evaluate_results(all_preds, all_targets, self.class_labels, "cnn", save_matrix_path)
+            eval.print_combined_multilabel_confusion_matrix(os.path.join(save_matrix_path, "cnn_multi-label_cm.pdf"), all_targets, all_preds, list(range(len(self.class_labels))), self.class_labels, title=None)
             try:
                 cm = multilabel_confusion_matrix(all_targets, all_preds)
                 os.makedirs(save_matrix_path, exist_ok=True)
@@ -605,7 +605,7 @@ class MAClsTrainer(object):
                     plt.xlabel('Predicted')
                     plt.ylabel('Actual')
                     plt.title(f'Confusion Matrix for Label {i}')
-                    plt.savefig(os.path.join(save_matrix_path, f'confusion_matrix_label_{i}_{int(time.time())}.pdf'))
+                    #plt.savefig(os.path.join(save_matrix_path, f'confusion_matrix_label_{i}_{int(time.time())}.pdf'))
                     plt.close()
             except Exception as e:
                 logger.error(f'Save confusion martrix{e}')

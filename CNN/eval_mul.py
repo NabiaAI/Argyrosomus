@@ -18,7 +18,7 @@ if __name__ == '__main__':
     add_arg('configs',          str,   'CNN/configs/fish3.yml',         "Configs")
     add_arg("use_gpu",          bool,  True,                        "USe GPU or not")
     add_arg('save_matrix_path', str,   'data/output/',            "Save dir")
-    add_arg('resume_model',     str,   'CNN/models//Res18_MelSpectrogram/best_model/',  "model path")
+    add_arg('resume_model',     str,   'CNN/models//Res18_MelSpectrogram_new/best_model/',  "model path")
     args = parser.parse_args()
     print_arguments(args=args)
 
