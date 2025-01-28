@@ -120,7 +120,7 @@ class MAClsTrainer(object):
             logger.warning('Windows cannot support')
             
 
-        self.optimal_thresholds = [0.6,0.7, 0.6]
+        self.optimal_thresholds = [0.3918635, 0.34454957, 0.46623608]
         self.spec_aug = SpecAug(**self.configs.dataset_conf.get('spec_aug_args', {}))
         self.spec_aug.to(self.device)
         self.max_step, self.train_step = None, None
@@ -383,8 +383,7 @@ class MAClsTrainer(object):
                 self.optimizer.step()
             self.optimizer.zero_grad()
 
-            thresholds = [0.6, 0.7, 0.6]
-            preds = self.apply_optimal_thresholds(output,thresholds)
+            preds = self.apply_optimal_thresholds(output,self.optimal_thresholds)
             correct = (preds == labels).float()
             acc = correct.sum().item() / (labels.size(0) * labels.size(1))
             accuracies.append(acc)
@@ -590,7 +589,8 @@ class MAClsTrainer(object):
         all_preds = np.vstack(all_preds)
         all_targets = np.vstack(all_targets)
         all_probs = np.vstack(all_probs)
-
+        eval.evaluate_results(all_preds, all_targets, self.class_labels, "cnn", save_matrix_path, plot=False)
+        print("Optimal thresholds for each label", find_optimal_thresholds(all_targets, all_probs))
 
         if save_matrix_path is not None:
             eval.plot_roc_curves(all_targets, all_probs, self.class_labels, os.path.join(save_matrix_path, 'cnn_roc_curve.pdf'))
