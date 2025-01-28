@@ -182,11 +182,14 @@ def aggregate_over_time(preds:np.ndarray, times:np.ndarray, n_boot=1, aggregatio
     if verbose:
         iterator = tqdm(list(iterator))
 
+    max_segments = aggr_interval_s//5
+
+    lb = 0 # lower bound search space
     for _, t in iterator:
+        ub = lb + max_segments * 30 # upper bound search space (give it some leeway)
         mean_time = np.array([t, t + aggr_interval_s]).mean()
-        batch_times = (t <= times) & (times < t + aggr_interval_s)
+        batch_times = (t <= times[lb:ub]) & (times[lb:ub] < t + aggr_interval_s)
         indices = np.where(batch_times)[0]
-        # indices = indices[:aggr_interval_s//5]
 
         if len(indices) == 0: #not np.any(batch_times):
             if fill_missing_with_NaN:
@@ -195,7 +198,11 @@ def aggregate_over_time(preds:np.ndarray, times:np.ndarray, n_boot=1, aggregatio
                 all_lt_m_w_counts.append(np.ones((n_boot, 3)) * np.nan)
             continue
 
-        batch = preds[indices]
+        max_idx = indices.max()
+        indices = indices[:max_segments] # limit to 1 sample per 5 seconds
+        batch = preds[lb:ub][indices]
+        lb += max_idx + 1
+
         if n_boot == 1:
             lt_m_w_counts = batch.sum(axis=0, keepdims=True)
             ratios = lt_m_w_counts[:, 1] / lt_m_w_counts[:, 2]
@@ -411,7 +418,7 @@ def dial_plot_print(in_path, aggregation_interval_minutes=10):
     m_count = transform_time_series_to_dial_plot(m_count, slices_per_day, padding=slices_per_day//2)
 
     plt.figure(figsize=(8,4))
-    plt.imshow(all_times,  )
+    plt.imshow(m_count,  )
     plt.colorbar()
     plt.show()
                 
