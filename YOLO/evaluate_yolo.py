@@ -27,7 +27,7 @@ def run_on_list(test_list, output_path):
 
     which = ['lt', 'm', 'w']
     eval.plot_roc_curves(labels, probs, which, os.path.join(output_path, "yolo_roc.pdf"))
-    eval.evaluate_results(preds, labels, which, model_path.split('/')[-3], output_path)
+    eval.evaluate_results(preds, labels, which, "yolo", output_path)
     eval.print_combined_multilabel_confusion_matrix(os.path.join(output_path, "yolo_multi-label_cm.pdf"), labels, preds, list(range(len(which))), which, title=None)
         
     quant.eval_ratio_error(probs, preds, labels, probs, preds, labels, [[0,1], [1,2]])

@@ -50,7 +50,7 @@ def plot_roc_curves(y_true, y_probs, labels, path):
     plt.savefig(path, bbox_inches='tight', pad_inches=0)
     plt.close()
 
-def evaluate_results(all_preds, all_targets, class_labels, model_info, save_matrix_path):
+def evaluate_results(all_preds, all_targets, class_labels, model_info, save_matrix_path, plot=True):
     plt.rcdefaults()
     # accuacy
     accuracy = (all_preds == all_targets).mean()
@@ -60,7 +60,7 @@ def evaluate_results(all_preds, all_targets, class_labels, model_info, save_matr
     print(f'Subset Accuracy: {subset_accuracy:.5f}')
     # confusion matrix
     cm = multilabel_confusion_matrix(all_targets, all_preds)
-    os.makedirs(save_matrix_path, exist_ok=True)
+    if plot: os.makedirs(save_matrix_path, exist_ok=True)
     for i, matrix in enumerate(cm):
         tn, fp, fn, tp = matrix.ravel()
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0
@@ -69,6 +69,8 @@ def evaluate_results(all_preds, all_targets, class_labels, model_info, save_matr
         output_string = f'Precision: {precision:.5f}, Recall: {recall:.5f}, Accuracy: {accuracy:.5f}'
         print(f'Label: {class_labels[i]} - {output_string}')
 
+        if not plot: 
+            continue
         plt.figure(figsize=(10, 8))
         sns.heatmap(matrix, annot=True, fmt='d', cmap='Blues', vmin=0, vmax=600, cbar=False)
         plt.xlabel('Predicted')

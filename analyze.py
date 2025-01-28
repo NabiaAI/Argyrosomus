@@ -1,6 +1,7 @@
 import sys
 import os
 import shutil
+import datetime
 import h5py
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(current_dir, '..', '..', '..'))
@@ -162,7 +163,51 @@ def plot_analysis(all_ratios, all_m_w_counts, n_boot, batch_number, slope, slope
     plt.savefig(f'{path}_daily.pdf', bbox_inches='tight', pad_inches=0)
     plt.close()
 
-def analyze(in_path, n_boot=1, ):
+def aggregate_over_time(preds:np.ndarray, times:np.ndarray, n_boot=1, aggregation_interval_minutes = 10, fill_missing_with_NaN=False, min_time=None, max_time=None, verbose=False):
+    assert len(preds) == len(times)
+    assert (not np.isnan(times).any()), "Times contain NaNs"
+
+    idx = np.argsort(times)
+    preds = preds[idx]
+    times = times[idx]
+
+    aggr_interval_s = aggregation_interval_minutes * 60
+    all_ratios = []
+    all_lt_m_w_counts = []
+    all_times = []
+    if min_time is None: min_time = times.min()
+    if max_time is None: max_time = times.max()
+
+    iterator = enumerate(range(min_time, max_time, aggr_interval_s))
+    if verbose:
+        iterator = tqdm(list(iterator))
+
+    for _, t in iterator:
+        mean_time = np.array([t, t + aggr_interval_s]).mean()
+        batch_times = (t <= times) & (times < t + aggr_interval_s)
+        indices = np.where(batch_times)[0]
+        # indices = indices[:aggr_interval_s//5]
+
+        if len(indices) == 0: #not np.any(batch_times):
+            if fill_missing_with_NaN:
+                all_times.append(mean_time)
+                all_ratios.append(np.ones((n_boot,)) * np.nan)
+                all_lt_m_w_counts.append(np.ones((n_boot, 3)) * np.nan)
+            continue
+
+        batch = preds[indices]
+        if n_boot == 1:
+            lt_m_w_counts = batch.sum(axis=0, keepdims=True)
+            ratios = lt_m_w_counts[:, 1] / lt_m_w_counts[:, 2]
+        else:
+            lt_m_w_counts, ratios = quant.bootstrap(preds=batch, which_ratio=[1,2], n=n_boot)
+        all_times.append(mean_time)
+        all_ratios.append(ratios)
+        all_lt_m_w_counts.append(lt_m_w_counts)
+    return all_ratios, all_lt_m_w_counts, all_times
+
+
+def analyze_by_day(in_path, n_boot=1, ):
     print(f"Analyzing {in_path}")
     preds = np.load(f'{in_path}_preds.npz')['preds'] # shape (n, 3)
     times = np.load(f'{in_path}_times.npz')['times'] # shape (n,) in seconds of the day
@@ -173,18 +218,10 @@ def analyze(in_path, n_boot=1, ):
     preds = preds[valid_times]
     times = times[valid_times]
 
-    aggregation_interval_minutes = 10
-    batch_number = 24*60 // aggregation_interval_minutes
-    batch_size = len(preds) // batch_number
-    all_ratios = []
-    all_lt_m_w_counts = []
-    for i in range(batch_number):
-        batch = preds[i * batch_size:(i + 1) * batch_size]
-        time = times[i * batch_size:(i + 1) * batch_size].mean() / 3600 # in hours
-        lt_m_w_counts, ratios = quant.bootstrap(preds=batch, which_ratio=[1,2], n=n_boot)
-        batch_ratios = np.vstack([np.ones_like(ratios) * time, ratios]).T
-        all_ratios.append(batch_ratios)
-        all_lt_m_w_counts.append(lt_m_w_counts)
+    all_ratios, all_lt_m_w_counts, all_times = aggregate_over_time(preds, times, n_boot=n_boot)
+    batch_number = len(all_times)
+
+    all_ratios = [np.vstack([np.ones_like(ratios) * time / 3600, ratios]).T for time, ratios in zip(all_times, all_ratios)]
 
     slopes = []
     ratios_3d = np.array(all_ratios)
@@ -258,7 +295,7 @@ def analyze_all(in_path, load_labels=False):
             if f.endswith('_preds.npz'):
                 f: str = f.replace('_preds.npz', '')
                 p = os.path.join(root, f)
-                counts = analyze(p)
+                counts = analyze_by_day(p)
                 dates.append(f)
                 sums.append(counts.sum(axis=0)/len(counts)) # average over time slots (negates the effect if a day has less data)
     sums = np.array(sums)
@@ -315,6 +352,70 @@ def plot_over_time(in_path):
     plt.savefig(f'{in_path}/over_years.pdf', bbox_inches='tight', pad_inches=0)
     plt.close()
 
+def get_epoch_time(date_str):
+    date = datetime.datetime.strptime(date_str, "%Y%m%d")
+    return int(date.timestamp())
+
+def dial_plot_compute(in_path, result_path, aggregation_interval_minutes=10):
+    all_days_preds = []
+    all_days_times = []
+    min_day = 10_000_000_000
+    max_day = 0
+    runs = 0
+    for root, _, files in os.walk(in_path):
+        assert runs == 0, "Only one level is supported"
+        files = sorted(files)
+        files = list(filter(lambda x: x.endswith('_preds.npz'), files))
+        for f in tqdm(files, total=len(files)):
+            f: str = f.replace('_preds.npz', '')
+            day_time_unix = get_epoch_time(f) # f is in YYYYMMDD format
+            p = os.path.join(root, f)
+            preds = np.load(f'{p}_preds.npz')['preds'] # shape (n, 3)
+            times = np.load(f'{p}_times.npz')['times'] # shape (n,) in seconds of the day
+            times += day_time_unix
+            min_day = min(min_day, day_time_unix)
+            max_day = max(max_day, day_time_unix)
+            all_days_preds.append(preds)
+            all_days_times.append(times)
+
+    all_days_preds = np.vstack(all_days_preds)
+    all_days_times = np.hstack(all_days_times)
+    max_time = max_day+24*3600 
+    _, all_lt_m_w_counts, all_times = aggregate_over_time(all_days_preds, all_days_times, fill_missing_with_NaN=True, 
+                                                          min_time=min_day, max_time=max_time , aggregation_interval_minutes=aggregation_interval_minutes,
+                                                          verbose=True)
+    all_lt_m_w_counts, all_times = np.vstack(all_lt_m_w_counts), np.array(all_times)
+
+    np.save(f'{result_path}/all_lt_m_w_counts.npy', all_lt_m_w_counts)
+    np.save(f'{result_path}/all_times.npy', all_times)
+    
+def transform_time_series_to_dial_plot(time_series, slices_per_day, padding=0):
+    '''time series to bottom-to-top intra_day (y) and left-to-right inter_day (x)'''
+    time_series = np.pad(time_series, (padding, padding), mode='constant', constant_values=np.nan)
+    dial_plot = time_series.reshape(-1, slices_per_day) # time is ascending left->right (intra-day) and top->bottom (inter-day)
+    dial_plot = dial_plot.T # time ascending left->right (inter-day) and top->bottom (intra-day)
+    dial_plot = dial_plot[::-1] # horizontally flip the image so time is moving from bottom to top
+    return dial_plot
+
+
+def dial_plot_print(in_path, aggregation_interval_minutes=10):
+    all_lt_m_w_counts:np.ndarray = np.load(f'{in_path}/all_lt_m_w_counts.npy')
+    all_times = np.load(f'{in_path}/all_times.npy')
+
+    m_count = all_lt_m_w_counts[:, 1]
+    slices_per_day = 24 * 60 // aggregation_interval_minutes
+
+    # pad half a day in the beggining and end so 24h is in the middle of the plot
+    #m_count = np.pad(m_count, (slices_per_day//2, slices_per_day//2), mode='edge')
+
+    m_count = transform_time_series_to_dial_plot(m_count, slices_per_day, padding=slices_per_day//2)
+
+    plt.figure(figsize=(8,4))
+    plt.imshow(all_times,  )
+    plt.colorbar()
+    plt.show()
+                
+
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     add_arg = functools.partial(add_arguments, argparser=parser)
@@ -330,9 +431,12 @@ if __name__ == '__main__':
     yolo_model = YOLOMultiLabelClassifier("YOLO/final_model/weights",)
     in_path = 'convert_to_wav/wav'
     out_path = 'data/analyzed'
-    infer_all(in_path, out_path)
+    #infer_all(in_path, out_path)
     #infer(args, path=f"{in_path}/20210707", out_path=out_path,skip_existing=True)
 
-    analyze_all(out_path)
+    #analyze_all(out_path)
+
+    dial_plot_compute(out_path, "data")
+    dial_plot_print("data")
 
     # analyze_against_validation_data('YOLO/data/validation/audio', skip_existing=True)

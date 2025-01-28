@@ -314,6 +314,8 @@ def extract_time_stamp(file_path:str):
     if file_path.endswith('_.wav'):
         idx = file_path.find('_.wav')
         hour_str = file_path[idx-4:idx] # 0416_.wav => 4h 16 min
+    elif len(file_path.split('/')[-1]) == 4+4 and file_path[-8:-4].isdigit(): # 0415.wav
+        hour_str = file_path[-8:-4]
     elif 'log' in file_path:
         hour_str = file_path.split('.')[-2][-2:] # log00001.wav => 1h; log00022.wav => 22h
         hour_str += '00' # add minutes
