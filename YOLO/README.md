@@ -23,6 +23,8 @@ The following list outlines the typical workflow to train, evaluate, and use YOL
     - A list of numpy arrays and a sampling rate (sr) representing audios. In this case, None will be returned for labels.
   - At the bottom of the file is a usage example that infers a folder of audios and saves the results as raven tables.
 
+`YOLO/yolo_overview.pdf` gives an overview over the previously described steps and general behavior. The light-blue parts are only relevant during training.
+
 # Notes 
 - Multi-label outputs are given as arrays of form `(n, 3)`, where `n` is the number of samples classified. Each column stands for a certain fish. The mapping is 0:lt, 1:m, 2:w.
 - The labeled data can be found in `labeled_data`.
