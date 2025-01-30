@@ -41,8 +41,11 @@ def convert_to_wav(src, dest, orig_sampling_rate, numch, target_sampling_rate=40
     with open(src, "rb") as f:
         valorFile = 4096  # header of the dat files
         f.seek(valorFile * np.dtype(np.int16).itemsize, os.SEEK_SET) # skip header
-
-        data = np.fromfile(f, dtype=np.int16)
+        try: 
+            data = np.fromfile(f, dtype=np.int16)
+        except Exception as e:
+            print(f"Error reading {src}")
+            raise e
         channel_0 = data[::numch] # only get first channel
         channel_0 -= 32768
 
@@ -64,4 +67,5 @@ if __name__ == '__main__':
             continue
         os.makedirs(os.path.dirname(dest), exist_ok=True)
 
-        convert_to_wav(os.path.join(root, file), dest, sampling_rate, numch)
+        src = os.path.join(root, file)
+        convert_to_wav(src, dest, sampling_rate, numch)
