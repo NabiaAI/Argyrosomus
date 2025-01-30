@@ -2,7 +2,6 @@ import sys
 import os
 import shutil
 import datetime
-import h5py
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(current_dir, '..', '..', '..'))
 sys.path.append(project_root)
@@ -26,13 +25,29 @@ from YOLO.create_data_yolo import normalize_audio
 from YOLO.infer_yolo import YOLOMultiLabelClassifier, load_cached, segment_audios
 from concurrent.futures import ProcessPoolExecutor
     
-def infer_cnn(args, audios, sample_rate):
+def _infer_cnn(args, audios, sample_rate):
     audios = [AudioSegment.from_ndarray(audio, sample_rate) for audio in audios]
     trainer = MAClsTrainer(configs=args.configs, use_gpu=args.use_gpu)
     outs, preds = trainer.predict(audios,resume_model=args.resume_model)
     return preds,outs
 
-def infer_yolo(audios, sample_rate):
+def _infer_yolo(audios, sample_rate):
+    """
+    Perform YOLO inference on a list of audio samples.
+
+    This function normalizes the input audio samples, creates spectrograms using a 
+    persistent ProcessPoolExecutor for efficiency, and performs batch inference using a YOLO model.
+
+    Parameters:
+        audios (list): List of audio samples to be processed.
+        sample_rate (int): The sample rate of the audio samples.
+
+    Returns:
+        tuple: A tuple containing:
+            - np.array: Array of predictions for each audio sample.
+            - list: List of bounding boxes for each prediction.
+            - list: List of total vocaliztions for each audio sample.
+    """
     audios = [normalize_audio(audio) for audio in audios]
     # persistant executor to speed up spectrogram creation
     executor = ProcessPoolExecutor(max_workers=os.cpu_count()-1)
@@ -51,7 +66,17 @@ def infer_yolo(audios, sample_rate):
         box_preds.extend(box_preds_batch)
     return np.array(preds), boxes, box_preds
 
-def save_array_list(path, arrays: list[np.ndarray]):
+def _save_array_list(path, arrays: list[np.ndarray]):
+    """
+    Save a list of numpy arrays to a compressed .npz file as a single array, with each array 
+    prefixed by its index in the list. Empty arrays are ignored and not saved explicitly.
+    Therefore, if an index is missing, the corresponding array is empty (arr.size == 0).
+
+    Parameters:
+    path (str): The file path where the .npz file will be saved.
+    arrays (list of np.ndarray): A list of numpy arrays to be saved. Each array 
+                                 will be prefixed with its index in the list 
+    """
     arrays_with_idx = []
     for i, array in enumerate(arrays):
         if array.size == 0:
@@ -61,6 +86,21 @@ def save_array_list(path, arrays: list[np.ndarray]):
     np.savez_compressed(path, boxes_with_segment_idx=array_with_idx)
 
 def infer(args, path: str, out_path, skip_existing=True, save_box_preds=False):
+    """
+    Perform inference on audio files and save the results.
+
+    Parameters:
+    args (Namespace): Arguments required for the CNN inference model.
+    path (str): Path to the input file or directory containing audio files. 
+                It can be one of the following: 
+
+                - A .txt file containing a list of paths to audio files. The output name will be the name of the .txt file. 
+                - A .wav file. The output name will be the name of the .wav file. 
+                - A directory containing .wav files. The output name will be the name of the directory.
+    out_path (str): Path to the directory where output files will be saved.
+    skip_existing (bool, optional): If True, skip processing if output files already exist. Default is True.
+    save_box_preds (bool, optional): If True, save box predictions, which are total vocalizations. Default is False.
+    """
     if os.path.isfile(path):
         if path.endswith('.txt'):
             with open(path) as f:
@@ -87,8 +127,8 @@ def infer(args, path: str, out_path, skip_existing=True, save_box_preds=False):
     times, audios, sample_rate = segment_audios(paths)
 
     #preds, boxes = infer_cnn(args, audios, sample_rate)
-    preds, boxes, box_preds = infer_yolo(audios, sample_rate)
-    save_array_list(out_boxes, boxes)
+    preds, boxes, box_preds = _infer_yolo(audios, sample_rate)
+    _save_array_list(out_boxes, boxes)
     np.savez_compressed(out_times, times=times)
     np.savez_compressed(out_preds, preds=preds)
     if save_box_preds:
@@ -104,7 +144,19 @@ def _get_full_path_of_audio_files(audio_path):
             audio_files[file] = os.path.join(root, file)
     return audio_files
 
-def smooth_and_plot(x, y, window_size, label, color, only_moveing_average=False):
+def _smooth_and_plot(x, y, window_size, label, color, only_moveing_average=False):
+    """
+    Smooths and plots the input data using a moving average and optionally plots the smoothed data using spline interpolation.
+    
+    Parameters:
+    x (array-like): The x-coordinates of the data points.
+    y (array-like): The y-coordinates of the data points.
+    window_size (int): The size of the window for computing the moving average.
+    label (str): The label for the plot.
+    color (str): The color of the plot line.
+    only_moveing_average (bool, optional): If True, only the moving average is plotted.
+                                           Otherwise a B-Spline interpolation is added. Defaults to False.
+    """
     # Compute the moving average
     y_smooth = np.convolve(y, np.ones(window_size)/window_size, mode='valid')
     x_smooth = np.convolve(x, np.ones(window_size)/window_size, mode='valid')
@@ -127,7 +179,7 @@ def smooth_and_plot(x, y, window_size, label, color, only_moveing_average=False)
     # Plot the smoothed line
     plt.plot(xnew, y_smooth_spline, color=color, label=label, alpha=0.3)
 
-def plot_analysis(all_ratios, all_m_w_counts, n_boot, batch_number, slope, slope_ci, intercept, r_value, trend_str, path):
+def _plot_analysis(all_ratios, all_m_w_counts, n_boot, batch_number, slope, slope_ci, intercept, r_value, trend_str, path):
     if n_boot == 1:
         chosen_idxes = np.arange(all_ratios.shape[0])
     else: 
@@ -149,9 +201,9 @@ def plot_analysis(all_ratios, all_m_w_counts, n_boot, batch_number, slope, slope
 
     # Plot smoothed lines 
     window_size = 10  # Adjust the window size as needed
-    smooth_and_plot(plt_ratios[:,0], plt_lt_m_w[:,0], window_size, None, 'orange')
-    smooth_and_plot(plt_ratios[:,0], plt_lt_m_w[:,1], window_size, None, 'green')
-    smooth_and_plot(plt_ratios[:,0], plt_lt_m_w[:,2], window_size, None, 'red')
+    _smooth_and_plot(plt_ratios[:,0], plt_lt_m_w[:,0], window_size, None, 'orange')
+    _smooth_and_plot(plt_ratios[:,0], plt_lt_m_w[:,1], window_size, None, 'green')
+    _smooth_and_plot(plt_ratios[:,0], plt_lt_m_w[:,2], window_size, None, 'red')
 
     ax2.set_ylabel('Counts'), ax2.legend(fontsize='small')
     plt.grid(axis='x', alpha=0.2)
@@ -164,6 +216,25 @@ def plot_analysis(all_ratios, all_m_w_counts, n_boot, batch_number, slope, slope
     plt.close()
 
 def aggregate_over_time(preds:np.ndarray, times:np.ndarray, n_boot=1, aggregation_interval_minutes = 10, fill_missing_with_NaN=False, min_time=None, max_time=None, verbose=False):
+    """
+    Sums `n` predictions over specified time intervals.
+
+    Parameters:
+    preds (np.ndarray): Array of predictions with shape=(n, 3).
+    times (np.ndarray): Array of corresponding times shape=(n,).
+    n_boot (int, optional): Number of bootstrap samples. Default is 1.
+    aggregation_interval_minutes (int, optional): Interval for aggregation in minutes. Default is 10.
+    fill_missing_with_NaN (bool, optional): Whether to fill missing time intervals with NaN. Default is False.
+    min_time (int, optional): Minimum time for aggregation. Default is None, which uses the minimum time in `times`.
+    max_time (int, optional): Maximum time for aggregation. Default is None, which uses the maximum time in `times`.
+    verbose (bool, optional): Whether to display progress. Default is False.
+
+    Returns:
+    tuple: A tuple containing:
+        - all_ratios (list): List of aggregated ratios with shape=(n, n_boot,).
+        - all_lt_m_w_counts (list): List of aggregated counts with shape=(n, n_boot, 3).
+        - all_times (list): List of mean times for each aggregation interval with shape=(n,).
+    """
     assert len(preds) == len(times)
     assert (not np.isnan(times).any()), "Times contain NaNs"
 
@@ -215,7 +286,28 @@ def aggregate_over_time(preds:np.ndarray, times:np.ndarray, n_boot=1, aggregatio
     return all_ratios, all_lt_m_w_counts, all_times
 
 
-def analyze_by_day(in_path, n_boot=1, ):
+def analyze_by_day(in_path, n_boot=1):
+    """
+    Analyzes prediction data by day and performs statistical trend tests over the day and plotting.
+
+    The function performs the following steps:
+    1. Loads prediction and time data from .npz files.
+    2. Filters out invalid times that are not within a day.
+    3. Aggregates data over time and calculates ratios.
+    4. Computes slopes using linear regression for each bootstrap sample.
+    5. Performs Mann-Kendall monotonic trend test.
+    6. Calculates confidence intervals for the slopes if n_boot > 1.
+    7. Prints statistical results including slope, r-value, p-value, and trend.
+    8. Plots the analysis results as graph of counts over the day.
+
+    Parameters:
+    in_path (str): The input path to the prediction and time data files.
+    n_boot (int, optional): The number of bootstrap samples to use for slope estimation. Default is 1.
+
+    Returns:
+    np.ndarray: An array of counts of each fish species over time intervals. Shape is (n, 3) where n is 
+    the number of time intervals.
+    """
     print(f"Analyzing {in_path}")
     preds = np.load(f'{in_path}_preds.npz')['preds'] # shape (n, 3)
     times = np.load(f'{in_path}_times.npz')['times'] # shape (n,) in seconds of the day
@@ -257,17 +349,37 @@ def analyze_by_day(in_path, n_boot=1, ):
     
     print(trend_str)
 
-    plot_analysis(all_ratios, all_lt_m_w_counts, n_boot, batch_number, slope, slope_ci, intercept, r_value, trend_str, path=in_path)
+    _plot_analysis(all_ratios, all_lt_m_w_counts, n_boot, batch_number, slope, slope_ci, intercept, r_value, trend_str, path=in_path)
     return all_lt_m_w_counts
 
 def infer_all(in_path, out_path, skip_existing=True):
+    """
+    Perform inference on all directories within the given input path.
+
+    Parameters:
+        in_path (str): The input directory path containing subdirectories to process.
+        out_path (str): The output directory path where results will be saved.
+        skip_existing (bool, optional): If True, skip processing for directories that already have results. Defaults to True.
+    """
     for root, dirs, _ in os.walk(in_path):
         dirs = sorted(dirs)
         for d in tqdm(dirs):
             p = os.path.join(root, d)
             infer(args, path=p, out_path=out_path, skip_existing=skip_existing)
 
-def get_true_counts(path_to_selection_table):
+def _get_true_counts(path_to_selection_table):
+    """
+    Calculate the true counts of fish sounds in segments of 5 seconds from a Raven selection table.
+
+    Parameters:
+        path_to_selection_table (str): The file path to the selection table in CSV format.
+
+    Returns:
+        tuple: A tuple containing two numpy arrays:
+            - The first array contains the binary presence (0 or 1) of each category ('lt', 'm', 'w') 
+              across all segments.
+            - The second array contains the total counts of each category ('lt', 'm', 'w') across all segments.
+    """
     label_idx_mapping = {
         'lt': 0,
         'm': 1,
@@ -292,7 +404,18 @@ def get_true_counts(path_to_selection_table):
     labels = np.array(labels)
     return np.clip(labels, 0, 1).sum(axis=0), labels.sum(axis=0)
 
-def analyze_all(in_path, load_labels=False):
+def analyze_all_days_by_day(in_path):
+    """
+    Analyzes data for all `n` days in the given input directory. Each day is analyzed by day.
+
+    Parameters:
+        in_path (str): The input directory path containing the day directories (format YYYYMMDD) to be analyzed.
+
+    Returns:
+        tuple: A tuple containing:
+            - dates (numpy.ndarray): An array of dates corresponding to the processed day result files. Shape =(n,).
+            - sums (numpy.ndarray): An array of average counts over time slots for each day. Shape=(n, 3).
+    """
     dates=[]
     sums = []
     runs = 0
@@ -310,8 +433,18 @@ def analyze_all(in_path, load_labels=False):
     dates = np.array(dates)
     return dates, sums
 
-def analyze_against_validation_data(validation_path, skip_existing=False):
-    dest = f"data/validation_analyzed"
+def plot_against_validation_data(validation_path, dest = f"data/validation_analyzed", skip_existing=False):
+    """
+    Plots analyzed audio files against ground-truth validation data 
+    and generates comparison plots based on segmented and total count.
+
+    Parameters:
+    validation_path (str): The path to the directory containing audio files along with ground-truth Raven selection tabels.
+    dest (str, optional): The destination directory to save plots. Defaults to "data/validation_analyzed".
+    skip_existing (bool, optional): If True, skips processing files that already exist in the destination directory. Defaults to False.
+    Raises:
+    AssertionError: If the corresponding Raven selection table file for an audio file is not found.
+    """
     for f in sorted(os.listdir(validation_path)):
         p = os.path.join(validation_path, f)
         if f.endswith('.wav'):
@@ -334,7 +467,7 @@ def analyze_against_validation_data(validation_path, skip_existing=False):
 
             raven_file = f'{p[:p.index('_preds.npz')]}.Table.1.selections.txt'
             assert os.path.exists(raven_file), f"Labels not found for {p}"
-            segment_counts, total_counts = get_true_counts(raven_file)
+            segment_counts, total_counts = _get_true_counts(raven_file)
             true_counts.append(segment_counts), true_counts_total.append(total_counts)
             dates.append(f)
     
@@ -347,7 +480,17 @@ def analyze_against_validation_data(validation_path, skip_existing=False):
 
 
 def plot_over_time(in_path):
-    sums, dates = analyze_all(in_path)
+    """
+    The function reads result files (format 'YYYYMMDD') from the specified input path, processes it to 
+    calculate sums for each day, formats the dates, and then plots the sums 
+    against the dates. The resulting plot is saved as 'over_years.pdf' in the 
+    input path directory.
+
+    Parameters:
+        in_path (str): The input path where result_files (format 'YYYYMMDD') reside. 
+                       Dates are extracted from the file names.
+    """
+    sums, dates = analyze_all_days_by_day(in_path)
     dates = list(map(lambda x: x[:4] + '.' + x[4:6] + '.' + x[6:8], dates))
 
     # plot the sums against the dates
@@ -360,11 +503,30 @@ def plot_over_time(in_path):
     plt.savefig(f'{in_path}/over_years.pdf', bbox_inches='tight', pad_inches=0)
     plt.close()
 
-def get_epoch_time(date_str):
+def _get_epoch_time(date_str):
+    """Returns a unix timestamp from a date string in the format 'YYYYMMDD'."""
     date = datetime.datetime.strptime(date_str, "%Y%m%d")
     return int(date.timestamp())
 
 def compute_count_over_years(in_path, result_path, aggregation_interval_minutes=10):
+    """
+    Computes and aggregates prediction counts (segmented count) over time for result files found in in_path.
+    Missing data is filled with NaN.
+
+    Parameters:
+    in_path (str): The input directory path containing the prediction and time files.
+    result_path (str): The output directory path where the aggregated results will be saved.
+    aggregation_interval_minutes (int, optional): The time interval in minutes for aggregating the data. Default is 10 minutes.
+
+    Notes:
+    - The input files should be in the format 'YYYYMMDD_preds.npz' and 'YYYYMMDD_times.npz'.
+    - The function assumes that the prediction files contain an array named 'preds' with shape (n, 3).
+    - The function assumes that the time files contain an array named 'times' with shape (n,) representing seconds of the day.
+
+    Saves:
+    - 'all_lt_m_w_counts.npy': Aggregated prediction counts over the specified time intervals.
+    - 'all_times.npy': Corresponding times for the aggregated prediction counts.
+    """
     all_days_preds = []
     all_days_times = []
     min_day = 10_000_000_000
@@ -376,7 +538,7 @@ def compute_count_over_years(in_path, result_path, aggregation_interval_minutes=
         files = list(filter(lambda x: x.endswith('_preds.npz'), files))
         for f in tqdm(files, total=len(files)):
             f: str = f.replace('_preds.npz', '')
-            day_time_unix = get_epoch_time(f) # f is in YYYYMMDD format
+            day_time_unix = _get_epoch_time(f) # f is in YYYYMMDD format
             p = os.path.join(root, f)
             preds = np.load(f'{p}_preds.npz')['preds'] # shape (n, 3)
             times = np.load(f'{p}_times.npz')['times'] # shape (n,) in seconds of the day
@@ -400,8 +562,8 @@ def compute_count_over_years(in_path, result_path, aggregation_interval_minutes=
     np.save(f'{result_path}/all_lt_m_w_counts.npy', all_lt_m_w_counts)
     np.save(f'{result_path}/all_times.npy', all_times)
     
-def transform_time_series_to_dial_plot(time_series, slices_per_day, padding=0):
-    '''time series to bottom-to-top intra_day (y) and left-to-right inter_day (x)'''
+def _transform_time_series_to_dial_plot(time_series, slices_per_day, padding=0):
+    '''Transforms ascending time series vector to bottom-to-top intra_day (y) and left-to-right inter_day (x) matrix'''
     time_series = np.pad(time_series, (padding, padding), mode='constant', constant_values=np.nan)
     dial_plot = time_series.reshape(-1, slices_per_day) # time is ascending left->right (intra-day) and top->bottom (inter-day)
     dial_plot = dial_plot.T # time ascending left->right (inter-day) and top->bottom (intra-day)
@@ -409,29 +571,46 @@ def transform_time_series_to_dial_plot(time_series, slices_per_day, padding=0):
     return dial_plot
 
 
-def dial_plot_print(in_path, aggregation_interval_minutes=10):
+def print_dial_plot(in_path, aggregation_interval_minutes=10, shift_by_fraction_of_day = 0.5, dest='data/output/dial_plot.pdf'):
+    """
+    Generates and saves a dial plot for the data generated by `compute_count_over_years`. Plot is saved to `dest`.
+    
+    The plot can be shifted by a fraction of a day along the y-axis to be able to place interesting features in the center of the plot 
+    and not have them be cut off by the transition to the next day.
+
+    Parameters:
+    in_path (str): The input path where the numpy files 'all_lt_m_w_counts.npy' and 'all_times.npy' are located.
+    aggregation_interval_minutes (int, optional): The interval in minutes for aggregating the data. 
+                                                  Needs to be the same as used in `compute_count_over_years`. Default is 10 minutes.
+    shift_by_fraction_of_day (float, optional): The fraction of a day to shift the plot along the y-axis. Default is 0.5 (half a day).
+    dest (str, optional): The destination path where the dial plot will be saved. Default is 'data/output/dial_plot.pdf'.
+    """
     all_lt_m_w_counts:np.ndarray = np.load(f'{in_path}/all_lt_m_w_counts.npy')
     all_times = np.load(f'{in_path}/all_times.npy')
 
     slices_per_day = 24 * 60 // aggregation_interval_minutes
-    padding = slices_per_day//2 # pad half a day in the beggining and end so 24h is in the middle of the plot
+    padding = int(slices_per_day*shift_by_fraction_of_day)# pad fraction of a day in the beggining and end to shift along day time (y) scale.
 
     # convert unix to datetime and get date string 
     first_day = datetime.datetime.fromtimestamp(min(all_times))
     last_day = datetime.datetime.fromtimestamp(max(all_times))
 
-    dial_plots = [transform_time_series_to_dial_plot(all_lt_m_w_counts[:, i], slices_per_day, padding=padding) for i in range(all_lt_m_w_counts.shape[1])]
-    time = transform_time_series_to_dial_plot(all_times, slices_per_day, padding=padding)
+    dial_plots = [_transform_time_series_to_dial_plot(all_lt_m_w_counts[:, i], slices_per_day, padding=padding) for i in range(all_lt_m_w_counts.shape[1])]
+    time = _transform_time_series_to_dial_plot(all_times, slices_per_day, padding=padding)
 
     fig, axes = plt.subplots(len(dial_plots), 1, figsize=(12, 5))
     for ax, dial_plot in zip(axes, dial_plots):
         im = ax.imshow(dial_plot,aspect=2)
 
-        idx_labels = [(first_day.replace(year=first_day.year + i)).strftime('%Y-%m-%d') for i in range(last_day.year - first_day.year)] + [last_day.strftime('%Y-%m-%d')]
-        idx = [i * 365 for i in range(len(idx_labels) - 1)] + [dial_plot.shape[1] - 1]
+        # print yearly dates on x-axis (plus last date)
+        idx_labels = [(first_day.replace(year=first_day.year + i)).strftime('%Y-%m-%d') for i in range(last_day.year - first_day.year)] 
+        idx_labels += [''] + [last_day.strftime('%Y-%m-%d')]
+        idx = [i * 365 for i in range(len(idx_labels)-1)] + [dial_plot.shape[1] - 1]
         ax.set_xticks(idx)
         ax.set_xticklabels(idx_labels, fontsize=5)
+        ax.set_xticks([min(i * 365//4, dial_plot.shape[1] - 1) for i in range(len(idx_labels)*4)], minor=True)
 
+        # print time in a da on y-axis
         idx = list(range(0, dial_plot.shape[0], int(6/24 * slices_per_day))) + [dial_plot.shape[0] - 1]
         ax.set_yticks(idx)
         time_not_nan_columns = time[:, np.all(~np.isnan(time), axis=0)] # find a column in time which is not none 
@@ -441,10 +620,11 @@ def dial_plot_print(in_path, aggregation_interval_minutes=10):
         ax.set_yticklabels(wall_clock, fontsize=5)
 
         fig.colorbar(im, ax=ax, orientation='vertical', shrink=0.8)
-    plt.show()
+    plt.savefig(dest, bbox_inches='tight', pad_inches=0)
                 
 
 def parse_args():
+    """Parses args for the CNN inference model."""
     parser = argparse.ArgumentParser(description=__doc__)
     add_arg = functools.partial(add_arguments, argparser=parser)
     add_arg('configs',          str,   'CNN/configs/fish3.yml',         "Configs")
@@ -459,12 +639,20 @@ if __name__ == '__main__':
     yolo_model = YOLOMultiLabelClassifier("YOLO/final_model/weights",)
     in_path = 'convert_to_wav/wav'
     out_path = 'data/analyzed'
-    #infer_all(in_path, out_path)
-    #infer(args, path=f"{in_path}/20210707", out_path=out_path,skip_existing=True)
 
-    #analyze_all(out_path)
+    #----------------------------------------------------------------------#
+    # Comment the functions you don't want to run. 
+    # Functions starting with _ are not meant to be called directly.
+    #----------------------------------------------------------------------#
 
-    #compute_count_over_years(out_path, "data")
-    dial_plot_print("data")
+    infer_all(in_path, out_path)
+    # infer(args, path=f"{in_path}/20210707", out_path=out_path,skip_existing=True)
 
-    # analyze_against_validation_data('YOLO/data/validation/audio', skip_existing=True)
+    # analyze_all_days_by_day(out_path)
+
+    # compute_count_over_years(out_path, "data")
+    # print_dial_plot("data")
+
+    # plot_against_validation_data('YOLO/data/validation/audio', skip_existing=True)
+
+    # plot_over_time(out_path)
