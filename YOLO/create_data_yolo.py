@@ -29,10 +29,38 @@ CATEGORY_MAPPING = {
 }
 
 def normalize_audio(audio_data):
+    """
+    Normalize the given audio data.
+
+    This function converts the audio data to floating point format and normalizes it by dividing 
+    by the maximum absolute value in the data. This ensures that the audio data is scaled between 
+    -1 and 1. (Required for Librosa.)
+
+    Parameters:
+    audio_data (numpy.ndarray): The input audio data to be normalized.
+
+    Returns:
+    numpy.ndarray: The normalized audio data in floating point format (required for Librosa).
+    """
     # Convert audio data to floating point and normalize
     return audio_data.astype(np.float32) / np.max(np.abs(audio_data))
 
 def append_audios(audio_folder, save=False, normalize=False):
+    """
+    Append all .wav audio files in a specified folder into a single audio file.
+    The order of the audio files is determined by their alphanumeric order.
+
+    Parameters:
+    audio_folder (str): The path to the folder containing the .wav files.
+    save (bool): If True, save the appended audio data to a new file named 'appended.wav' in the audio folder. Default is False.
+    normalize (bool): If True, normalize the appended audio data. Default is False.
+    
+    Returns:
+    tuple: A tuple containing the sample rate (int) and the appended audio data (numpy array).
+    
+    Raises:
+    AssertionError: If there is a sample rate mismatch between the .wav files.
+    """
     # Join all wav files in the audio foldeer, save as appended.wav
     # The file order should be alphabetical
     path = os.path.join(audio_folder, "appended.wav")
@@ -78,10 +106,31 @@ def append_audios(audio_folder, save=False, normalize=False):
     return sample_rate, audio
 
     
-
-# Function to save spectrogram without bounding boxes
 def save_spectrogram(segment, sr, *, file_name="", index=None, as_array = False, save_audio_path = None, averaging_period_s=None, 
                      n_fft=256, hop_length=64, frequency_limit_Hz=1000, image_folder="."):
+    """
+    Save a spectrogram of an audio segment as a `.png` image file or return it as a numpy array.
+
+    Parameters:
+    segment (np.ndarray): The audio segment to process.
+    sr (int): The sample rate of the audio segment.
+    file_name (str, optional): The base name for the output files. Defaults to "".
+    index (int, optional): The index of the segment, used for naming the output files. Defaults to None,
+        in which case the file name is not appended with an index.
+    as_array (bool, optional): If True, return the spectrogram as a numpy array instead of saving it as a file, 
+        otherwise return path to image. Defaults to False.
+    save_audio_path (str, optional): The directory to additionally save the audio segment as a wav file. 
+        If None, the audio segment is not saved. Defaults to None.
+    averaging_period_s (float, optional): The period in seconds over which to average the spectrogram. 
+        Useful for long-term spectrograms. Defaults to None.
+    n_fft (int, optional): The number of FFT components. Defaults to 256.
+    hop_length (int, optional): The number of samples between successive frames. Defaults to 64.
+    frequency_limit_Hz (int, optional): The maximum frequency to display in the spectrogram. Defaults to 1000 Hz.
+    image_folder (str, optional): The directory to save the spectrogram image. Defaults to ".".
+
+    Returns:
+    np.ndarray or str: The spectrogram as a numpy array if as_array is True, otherwise path to image.
+    """
     if sr != 4000:
         segment = librosa.resample(segment, orig_sr=sr, target_sr=4000)
         sr = 4000
@@ -122,6 +171,22 @@ def save_spectrogram(segment, sr, *, file_name="", index=None, as_array = False,
 
 
 def add_bounding_boxes(image_path, segment_start_time, segment_duration, sr, selections, labels_folder, base_name, stride_samples, idx, list_path, segment_audio_path=None):
+    """
+    Adds bounding boxes to a spectrogram image based on provided Raven selections and saves the updated image and annotations in YOLO format.
+    
+    Parameters:
+    image_path (str): Path to the spectrogram image.
+    segment_start_time (float): Start time of the audio segment in seconds.
+    segment_duration (float): Duration of the audio segment in seconds.
+    sr (int): Sample rate of the audio.
+    selections (pd.DataFrame): DataFrame containing ground-truth label information with columns 'Begin Time (s)', 'End Time (s)', 'Low Freq (Hz)', 'High Freq (Hz)', and 'category'.
+    labels_folder (str): Directory where the YOLO format label files will be saved.
+    base_name (str): Base name for the output files.
+    stride_samples (int): Number of samples to stride for each segment.
+    idx (int): Index of the current segment.
+    list_path (str): Path to the list file where segment information will be appended.
+    segment_audio_path (str, optional): Path to the directory containing segment audio files. Defaults to None.
+    """
     global total_labels
     # Open the saved spectrogram image
     image = Image.open(image_path)
@@ -230,8 +295,17 @@ def add_bounding_boxes(image_path, segment_start_time, segment_duration, sr, sel
     with open(os.path.join(labels_folder, txt_file_path), "w") as f:
         f.write("\n".join(bounding_boxes))
 
-# Function to copy images and labels to the destination
 def copy_files(file_list, dest_images_folder, dest_labels_folder, src_images_folder, src_labels_folder):
+    """
+    Copies image and label files from source folders to destination folders. Useful for splitting datasets.
+
+    Parameters:
+    file_list (list): List of image file names to be copied.
+    dest_images_folder (str): Destination folder path for image files.
+    dest_labels_folder (str): Destination folder path for label files.
+    src_images_folder (str): Source folder path for image files.
+    src_labels_folder (str): Source folder path for label files.
+    """
     for image_file in file_list:
         # Image file path
         src_image_path = os.path.join(src_images_folder, image_file)
@@ -249,6 +323,18 @@ def copy_files(file_list, dest_images_folder, dest_labels_folder, src_images_fol
 
 
 def split_data(image_folder, labels_folder, list_path):
+    """
+    Splits the dataset into training and validation sets randomly and copies the files to the respective folders.
+    Additionally, it creates a list of audio segments to labels for each set.
+
+    Parameters:
+    image_folder (str): Path to the folder containing the images.
+    labels_folder (str): Path to the folder containing the labels.
+    list_path (str): Path to the file containing the list of audio files and labels.
+
+    Raises:
+        AssertionError: If the number of images and labels do not match.
+    """
     # Output folders
     output_training_images_folder = "./datasets/to_train/train/images"
     output_training_labels_folder = "./datasets/to_train/train/labels"
@@ -300,6 +386,17 @@ def split_data(image_folder, labels_folder, list_path):
     print("Data split completed successfully!")
 
 def read_audio_file(file_path):
+    """
+    Reads an audio file and processes it.
+    - If the audio data is stereo, it will be converted to mono by averaging the channels.
+    - The audio data will be normalized using the `normalize_audio` function.
+
+    Parameters:
+        file_path (str): The path to the audio file.
+
+    Returns:
+        tuple: A tuple containing the sample rate (int) and the processed audio data (numpy array).
+    """
     sr, audio_data = wav.read(file_path)
 
     # Convert to mono if stereo
@@ -311,6 +408,27 @@ def read_audio_file(file_path):
     return sr, audio_data
 
 def extract_time_stamp(file_path:str):
+    """
+    Extracts the timestamp from a given file path and converts it to seconds.
+
+    The function handles different formats of file names to extract the hour and minute information:
+    - Files ending with '_.wav' (e.g., '0416_.wav') are interpreted as `hhmm` hours and minutes.
+    - Files with a name length of 8 characters where the last 4 characters are digits (e.g., '0415.wav') are interpreted as `hhmm` hours and minutes.
+    - Files containing 'log' (e.g., 'log00001.wav') are interpreted as hours with minutes set to '00'. 
+        Note files starting with `log` might not contain the correct time information in the filename, 
+        as they are just enumerated by the logger. 
+    - Files containing '_-' (e.g., '20161117_0757_-08.167-08.500.wav') are interpreted as hours and minutes derived from the decimal part.
+    - Other files are assumed to have a format where the hour and minute information is the second part of the filename (e.g., 'date_120000.wav').
+
+    Parameters:
+        file_path (str): The path to the file from which to extract the timestamp.
+
+    Returns:
+        int: The timestamp in seconds since 00h00 of that day.
+
+    Raises:
+        AssertionError: If the extracted hour string is not in the correct format.
+    """
     if file_path.endswith('_.wav'):
         idx = file_path.find('_.wav')
         hour_str = file_path[idx-4:idx] # 0416_.wav => 4h 16 min
@@ -332,6 +450,19 @@ def extract_time_stamp(file_path:str):
     return time_in_seconds
 
 def cut_audio_file_wall_time(file_path, start_wall_clock_time_s, end_wall_clock_time_s, save_base_path=None):
+    """
+    Cuts a segment from an audio file based on wall clock time (time of the day) and optionally saves it.
+
+    Parameters:
+        file_path (str): Path to the input audio file.
+        start_wall_clock_time_s (float): Start time in seconds from the wall clock (time of the day).
+        end_wall_clock_time_s (float): End time in seconds from the wall clock (time of the day).
+        save_base_path (str, optional): Base path to save the cut audio segment. If provided, the segment will be saved
+                                        with a filename that includes the start and end times. Defaults to None.
+
+    Returns:
+        tuple: A tuple containing the audio segment and the sample rate.
+    """
     ts = extract_time_stamp(file_path)
 
     segment, sr = cut_audio_file(file_path, start_wall_clock_time_s - ts, end_wall_clock_time_s - ts)
@@ -343,6 +474,21 @@ def cut_audio_file_wall_time(file_path, start_wall_clock_time_s, end_wall_clock_
     return segment, sr
 
 def cut_audio_file(file_path, start_time_s, end_time_s, save_base_path=None):
+    """
+    Cuts a segment from an audio file and optionally saves it to a specified path.
+
+    Parameters:
+    file_path (str): Path to the input audio file.
+    start_time_s (float): Start time of the segment in seconds.
+    end_time_s (float): End time of the segment in seconds.
+    save_base_path (str, optional): Base path to save the cut segment. If None, the segment is not saved.
+
+    Returns:
+    tuple: A tuple containing the audio segment (numpy array) and the sample rate (int).
+
+    Raises:
+    AssertionError: If start_time is negative, end_time exceeds the length of the audio data, or start_time is not less than end_time.
+    """
     # Read the audio file
     sr, audio_data = wav.read(file_path)
 
@@ -362,7 +508,19 @@ def cut_audio_file(file_path, start_time_s, end_time_s, save_base_path=None):
     return segment, sr
 
 def create_spectrograms(audio_folder, image_folder, labels_folder, segment_folder, list_path):
-    os.makedirs(image_folder, exist_ok=True), os.makedirs(labels_folder, exist_ok=True), os.makedirs(segment_folder, exist_ok=True) # create working dirs
+    """
+    Generate spectrogram images from audio files and create corresponding labels for YOLO using Raven selection tables as ground truth.
+    
+    Parameters:
+        audio_folder (str): Path to the folder containing audio files (`.wav`) 
+            and Raven selection tables (`.Table.1.selections.txt`).
+        image_folder (str): Path to the folder where spectrogram images will be saved.
+        labels_folder (str): Path to the folder where YOLO label files will be saved.
+        segment_folder (str): Path to the folder where audio segments will be saved.
+        list_path (str): Path to the file where the list of audio segments and labels will be saved.
+    """
+    # create working dirs
+    os.makedirs(image_folder, exist_ok=True), os.makedirs(labels_folder, exist_ok=True), os.makedirs(segment_folder, exist_ok=True) 
 
     if os.path.exists(list_path):
         os.remove(list_path)
@@ -392,9 +550,6 @@ def create_spectrograms(audio_folder, image_folder, labels_folder, segment_folde
             segment = audio_data[i:i + segment_samples]
             segment_start_time = i / sample_rate  # Start time of the current segment
             
-            segment_end_time = segment_start_time + segment_duration
-            latest_selection_end_time = selections['End Time (s)'].max()
-            
             # Save the spectrogram image
             image_path = save_spectrogram(segment, sample_rate, file_name=base_name, index=i // stride_samples, save_audio_path=segment_folder, image_folder=image_folder)
             
@@ -404,11 +559,20 @@ def create_spectrograms(audio_folder, image_folder, labels_folder, segment_folde
             images_generated += 1
 
 def create_long_term_spectrogram(base_path, day):
+    """
+    Generates and saves a long-term spectrogram for a given day's audio data.
+    Uses specific spectrogram parameters suited for long-term analysis.
+
+    Parameters:
+    base_path (str): The base directory path where the audio files are located.
+    day (str): The specific day (as a string) for which the spectrogram is to be created.
+    """
     n_fft, hop_length = 1024, 512 # PARAMETERS ONLY FOR LONG-TERM SPECTROGRAM (hop length = 50% overlap)
     sr, audio = append_audios(os.path.join(base_path, day), normalize=True)
     save_spectrogram(audio, sr, file_name=f"data/{day}_long-term", averaging_period_s=60, n_fft=n_fft, hop_length=hop_length)
 
 if __name__ == '__main__':
+    # --- EXAMPLE USAGE ---
 
     # create long-term spectrogram
     # create_long_term_spectrogram("../convert_to_wav/wav/", "20170419")
