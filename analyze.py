@@ -184,8 +184,8 @@ def aggregate_over_time(preds:np.ndarray, times:np.ndarray, n_boot=1, aggregatio
 
     max_segments = aggr_interval_s//5
 
-    lb = 0 # lower bound search space
-    for _, t in iterator:
+    lb = 0 # lower bound search space; this is done to improve efficiency by not searching the entire array
+    for i, t in iterator:
         ub = lb + max_segments * 30 # upper bound search space (give it some leeway)
         mean_time = np.array([t, t + aggr_interval_s]).mean()
         batch_times = (t <= times[lb:ub]) & (times[lb:ub] < t + aggr_interval_s)
@@ -198,6 +198,7 @@ def aggregate_over_time(preds:np.ndarray, times:np.ndarray, n_boot=1, aggregatio
                 all_lt_m_w_counts.append(np.ones((n_boot, 3)) * np.nan)
             continue
 
+        # Do not change the order of the next 4 lines light-heartedly
         max_idx = indices.max()
         indices = indices[:max_segments] # limit to 1 sample per 5 seconds
         batch = preds[lb:ub][indices]
@@ -363,7 +364,7 @@ def get_epoch_time(date_str):
     date = datetime.datetime.strptime(date_str, "%Y%m%d")
     return int(date.timestamp())
 
-def dial_plot_compute(in_path, result_path, aggregation_interval_minutes=10):
+def compute_count_over_years(in_path, result_path, aggregation_interval_minutes=10):
     all_days_preds = []
     all_days_times = []
     min_day = 10_000_000_000
@@ -379,6 +380,9 @@ def dial_plot_compute(in_path, result_path, aggregation_interval_minutes=10):
             p = os.path.join(root, f)
             preds = np.load(f'{p}_preds.npz')['preds'] # shape (n, 3)
             times = np.load(f'{p}_times.npz')['times'] # shape (n,) in seconds of the day
+            if preds.size == 0:
+                print(f"No data in {p}")
+                continue
             times += day_time_unix
             min_day = min(min_day, day_time_unix)
             max_day = max(max_day, day_time_unix)
@@ -409,17 +413,34 @@ def dial_plot_print(in_path, aggregation_interval_minutes=10):
     all_lt_m_w_counts:np.ndarray = np.load(f'{in_path}/all_lt_m_w_counts.npy')
     all_times = np.load(f'{in_path}/all_times.npy')
 
-    m_count = all_lt_m_w_counts[:, 1]
     slices_per_day = 24 * 60 // aggregation_interval_minutes
+    padding = slices_per_day//2 # pad half a day in the beggining and end so 24h is in the middle of the plot
 
-    # pad half a day in the beggining and end so 24h is in the middle of the plot
-    #m_count = np.pad(m_count, (slices_per_day//2, slices_per_day//2), mode='edge')
+    # convert unix to datetime and get date string 
+    first_day = datetime.datetime.fromtimestamp(min(all_times))
+    last_day = datetime.datetime.fromtimestamp(max(all_times))
 
-    m_count = transform_time_series_to_dial_plot(m_count, slices_per_day, padding=slices_per_day//2)
+    dial_plots = [transform_time_series_to_dial_plot(all_lt_m_w_counts[:, i], slices_per_day, padding=padding) for i in range(all_lt_m_w_counts.shape[1])]
+    time = transform_time_series_to_dial_plot(all_times, slices_per_day, padding=padding)
 
-    plt.figure(figsize=(8,4))
-    plt.imshow(m_count,  )
-    plt.colorbar()
+    fig, axes = plt.subplots(len(dial_plots), 1, figsize=(12, 5))
+    for ax, dial_plot in zip(axes, dial_plots):
+        im = ax.imshow(dial_plot,aspect=2)
+
+        idx_labels = [(first_day.replace(year=first_day.year + i)).strftime('%Y-%m-%d') for i in range(last_day.year - first_day.year)] + [last_day.strftime('%Y-%m-%d')]
+        idx = [i * 365 for i in range(len(idx_labels) - 1)] + [dial_plot.shape[1] - 1]
+        ax.set_xticks(idx)
+        ax.set_xticklabels(idx_labels, fontsize=5)
+
+        idx = list(range(0, dial_plot.shape[0], int(6/24 * slices_per_day))) + [dial_plot.shape[0] - 1]
+        ax.set_yticks(idx)
+        time_not_nan_columns = time[:, np.all(~np.isnan(time), axis=0)] # find a column in time which is not none 
+        wall_clock = [datetime.datetime.fromtimestamp(t) for t in time_not_nan_columns[idx, 0]]
+        # round to next hour
+        wall_clock = [(dt + datetime.timedelta(hours=int(round(dt.minute / 60)))).strftime('%Hh') for dt in wall_clock] 
+        ax.set_yticklabels(wall_clock, fontsize=5)
+
+        fig.colorbar(im, ax=ax, orientation='vertical', shrink=0.8)
     plt.show()
                 
 
@@ -443,7 +464,7 @@ if __name__ == '__main__':
 
     #analyze_all(out_path)
 
-    dial_plot_compute(out_path, "data")
+    #compute_count_over_years(out_path, "data")
     dial_plot_print("data")
 
     # analyze_against_validation_data('YOLO/data/validation/audio', skip_existing=True)
