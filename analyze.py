@@ -144,7 +144,33 @@ def _get_full_path_of_audio_files(audio_path):
             audio_files[file] = os.path.join(root, file)
     return audio_files
 
-def _smooth_and_plot(x, y, window_size, label, color, only_moveing_average=False):
+def _average_nan_partially_ignored(arr: np.ndarray, window_size):
+    """
+    Smooths an array by averaging values within a specified window size, partially ignoring NaN values.
+
+    Parameters:
+    arr (np.ndarray): Input array containing numerical values, possibly with NaNs.
+    window_size (int): Size of the window to use for averaging.
+
+    Returns:
+    np.ndarray: Smoothed array with the same shape as the input array, where each element is the average 
+                of the valid (non-NaN) values within the window centered on that element. If the number 
+                of valid values within the window is less than or equal to half the window size, the 
+                corresponding element in the output array will be NaN.
+    """
+    arr_smooth = np.ones_like(arr) * np.nan
+    half_window = window_size // 2
+    for i in range(len(arr)):
+        # Define the window range
+        start = max(0, i - half_window)
+        end = min(len(arr), i + half_window + 1)
+        window_values = arr[start:end]
+        valid_values = window_values[~np.isnan(window_values)] # Exclude np.nan values
+        if len(valid_values) > half_window:
+            arr_smooth[i] = np.mean(valid_values)
+    return arr_smooth
+
+def _smooth_and_plot(x, y, window_size, label, color, only_moving_average=False):
     """
     Smooths and plots the input data using a moving average and optionally plots the smoothed data using spline interpolation.
     
@@ -158,10 +184,10 @@ def _smooth_and_plot(x, y, window_size, label, color, only_moveing_average=False
                                            Otherwise a B-Spline interpolation is added. Defaults to False.
     """
     # Compute the moving average
-    y_smooth = np.convolve(y, np.ones(window_size)/window_size, mode='valid')
-    x_smooth = np.convolve(x, np.ones(window_size)/window_size, mode='valid')
+    y_smooth = _average_nan_partially_ignored(y, window_size)
+    x_smooth = _average_nan_partially_ignored(x, window_size)
 
-    if only_moveing_average:
+    if only_moving_average:
         plt.plot(x_smooth, y_smooth, color=color, label=label)
         return
     
@@ -479,26 +505,48 @@ def plot_against_validation_data(validation_path, dest = f"data/validation_analy
     eval.plot_validation_output(dates, box_preds_sums, true_counts_total, save_path=f"{dest}/result_total_calls.pdf")
 
 
-def plot_over_time(in_path):
+def plot_over_time(in_path, use_cached=False, aggr_interval_min=10, only_every_nth_day=1, smoothing_window=1):
     """
     The function reads result files (format 'YYYYMMDD') from the specified input path, processes it to 
     calculate sums for each day, formats the dates, and then plots the sums 
     against the dates. The resulting plot is saved as 'over_years.pdf' in the 
     input path directory.
 
+    If `use_cached` is True, the function uses cached results from `compute_count_over_years` 
+    and uses `in_path` as the path to find the results.
+
     Parameters:
-        in_path (str): The input path where result_files (format 'YYYYMMDD') reside. 
-                       Dates are extracted from the file names.
+    in_path (str): The input path where result_files (format 'YYYYMMDD') reside. 
+                    Dates are extracted from the file names.
+    use_cached (bool, optional): If True, uses cached results from `compute_count_over_years`. Default is False.
+    aggr_interval (int, optional): The time interval in minutes for aggregating the data. 
+                                    Must match results form `compute_counter_over_years`. Default is 10 minutes. 
+    only_every_nth_day (int, optional): The interval for plotting dates. Default is 1, i.e. every day.
+    smoothing_window (int, optional): The window size for smoothing the data line plot. Default is 1, i.e. no smoothing.
     """
-    sums, dates = analyze_all_days_by_day(in_path)
-    dates = list(map(lambda x: x[:4] + '.' + x[4:6] + '.' + x[6:8], dates))
+    if use_cached:
+        lt_m_w_counts = np.load(f'{in_path}/all_lt_m_w_counts.npy')
+        sums = [_transform_time_series_to_dial_plot(lt_m_w_counts[:,i], 24*60//aggr_interval_min).sum(axis=0) for i in range(lt_m_w_counts.shape[1])] 
+        sums = np.array(sums).T
+        times = np.load(f'{in_path}/all_times.npy')
+        times = _transform_time_series_to_dial_plot(times, 24*60//aggr_interval_min) 
+        dates = list(datetime.datetime.fromtimestamp(d).strftime('%Y-%m-%d') for d in times.mean(axis=0))
+    else:
+        sums, dates = analyze_all_days_by_day(in_path)
+        dates = list(map(lambda x: x[:4] + '.' + x[4:6] + '.' + x[6:8], dates))
 
     # plot the sums against the dates
-    plt.figure()
-    plt.plot(dates, sums[:,0], label='lt', marker="o", color='orange')
-    plt.plot(dates, sums[:,1], label='m', marker="x", color='green')
-    plt.plot(dates, sums[:,2], label='w', marker="+", color='red')
-    plt.xticks(np.arange(len(dates)), dates, rotation=90)
+    plt.figure(figsize=(16*2, 4*2))
+    datex_idx = list(range(0,len(dates),only_every_nth_day))
+    plt.scatter(datex_idx, sums[:,0][::only_every_nth_day], label='lt', marker="o", color='orange')
+    plt.scatter(datex_idx, sums[:,1][::only_every_nth_day], label='m', marker="x", color='green')
+    plt.scatter(datex_idx, sums[:,2][::only_every_nth_day], label='w', marker="+", color='red')
+    _smooth_and_plot(np.arange(len(dates)), sums[:,0], smoothing_window, None, 'orange', only_moving_average=True)
+    _smooth_and_plot(np.arange(len(dates)), sums[:,1], smoothing_window, None, 'green', only_moving_average=True)
+    _smooth_and_plot(np.arange(len(dates)), sums[:,2], smoothing_window, None, 'red', only_moving_average=True)
+    plt.xticks(list(range(0,len(dates),365))+[len(dates)-1], dates[::365]+[dates[-1]], rotation=90)
+    plt.xticks(np.arange(0, len(dates), 365/12), minor=True)
+   # plt.yscale('log')
     plt.legend()
     plt.savefig(f'{in_path}/over_years.pdf', bbox_inches='tight', pad_inches=0)
     plt.close()
@@ -645,7 +693,7 @@ if __name__ == '__main__':
     # Functions starting with _ are not meant to be called directly.
     #----------------------------------------------------------------------#
 
-    infer_all(in_path, out_path)
+    # infer_all(in_path, out_path)
     # infer(args, path=f"{in_path}/20210707", out_path=out_path,skip_existing=True)
 
     # analyze_all_days_by_day(out_path)
@@ -655,4 +703,4 @@ if __name__ == '__main__':
 
     # plot_against_validation_data('YOLO/data/validation/audio', skip_existing=True)
 
-    # plot_over_time(out_path)
+    plot_over_time("data", use_cached=True, only_every_nth_day=7, smoothing_window=40)
