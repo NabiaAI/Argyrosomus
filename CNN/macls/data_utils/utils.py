@@ -9,6 +9,7 @@ import torch
 
 
 def vad(wav, top_db=20, overlap=200):
+    # Split an audio signal into non-silent intervals
     intervals = librosa.effects.split(wav, top_db=top_db)
     if len(intervals) == 0:
         return wav
@@ -49,6 +50,7 @@ def concatenate(wave, overlap=200):
         max_idx = 0
         max_corr = 0
         pattern = prev[-overlap:]
+        # slide the curr batch to match with the pattern of previous one
         for j in range(overlap):
             match = curr[j:j + overlap]
             corr = np.sum(pattern * match) / [(np.sqrt(np.sum(pattern ** 2)) * np.sqrt(np.sum(match ** 2))) + 1e-8]
@@ -56,6 +58,7 @@ def concatenate(wave, overlap=200):
                 max_idx = j
                 max_corr = corr
 
+        # Apply the gain to the overlap samples
         start = end - overlap
         unfolded[start:end] *= fade_out
         end = start + (len(curr) - max_idx)
@@ -65,6 +68,15 @@ def concatenate(wave, overlap=200):
 
 
 def decode_audio(file, sample_rate: int = 16000):
+    """读取音频，主要用于兜底读取，支持各种数据格式
+
+    Args:
+      file: Path to the input file or a file-like object.
+      sample_rate: Resample the audio to this sample rate.
+
+    Returns:
+      A float32 Numpy array.
+    """
     resampler = av.audio.resampler.AudioResampler(format="s16", layout="mono", rate=sample_rate)
 
     raw_buffer = io.BytesIO()
@@ -86,7 +98,7 @@ def decode_audio(file, sample_rate: int = 16000):
 
     audio = np.frombuffer(raw_buffer.getbuffer(), dtype=dtype)
 
-
+    # Convert s16 back to f32.
     return audio.astype(np.float32) / 32768.0
 
 
@@ -106,7 +118,7 @@ def _group_frames(frames, num_samples=None):
     fifo = av.audio.fifo.AudioFifo()
 
     for frame in frames:
-        frame.pts = None 
+        frame.pts = None  # Ignore timestamp check.
         fifo.write(frame)
 
         if num_samples is not None and fifo.samples >= num_samples:
@@ -117,20 +129,61 @@ def _group_frames(frames, num_samples=None):
 
 
 def _resample_frames(frames, resampler):
-
+    # Add None to flush the resampler.
     for frame in itertools.chain(frames, [None]):
         yield from resampler.resample(frame)
 
 
-
+# 将音频流转换为numpy
 def buf_to_float(x, n_bytes=2, dtype=np.float32):
+    """Convert an integer buffer to floating point values.
+    This is primarily useful when loading integer-valued wav data
+    into numpy arrays.
 
+    Parameters
+    ----------
+    x : np.ndarray [dtype=int]
+        The integer-valued data buffer
+
+    n_bytes : int [1, 2, 4]
+        The number of bytes per sample in ``x``
+
+    dtype : numeric type
+        The target output type (default: 32-bit float)
+
+    Returns
+    -------
+    x_float : np.ndarray [dtype=float]
+        The input data buffer cast to floating point
+    """
+
+    # Invert the scale of the data
     scale = 1.0 / float(1 << ((8 * n_bytes) - 1))
+
+    # Construct the format string
     fmt = "<i{:d}".format(n_bytes)
+
+    # Rescale and format the data buffer
     return scale * np.frombuffer(x, fmt).astype(dtype)
 
 
 def make_pad_mask(lengths: torch.Tensor, max_len: int = 0) -> torch.Tensor:
+    """Make mask tensor containing indices of padded part.
+
+    See description of make_non_pad_mask.
+
+    Args:
+        lengths (torch.Tensor): Batch of lengths (B,).
+    Returns:
+        torch.Tensor: Mask tensor containing indices of padded part.
+
+    Examples:
+        >>> lengths = [5, 3, 2]
+        >>> make_pad_mask(lengths)
+        masks = [[0, 0, 0, 0 ,0],
+                 [0, 0, 0, 1, 1],
+                 [0, 0, 1, 1, 1]]
+    """
     batch_size = lengths.size(0)
     max_len = max_len if max_len > 0 else lengths.max().item()
     seq_range = torch.arange(0,

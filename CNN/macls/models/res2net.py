@@ -5,8 +5,6 @@ import torch.nn as nn
 
 from macls.models.pooling import AttentiveStatsPool, TemporalAveragePooling
 from macls.models.pooling import SelfAttentivePooling, TemporalStatisticsPooling
-from torchviz import make_dot
-import os
 
 
 class Bottle2neck(nn.Module):
@@ -88,11 +86,11 @@ class Bottle2neck(nn.Module):
         return out
 
 
-class Res2Netmul(nn.Module):
+class Res2Net(nn.Module):
 
     def __init__(self, num_class, input_size, m_channels=32, layers=[3, 4, 6, 3], base_width=32, scale=2, embd_dim=192,
                  pooling_type="ASP"):
-        super(Res2Netmul, self).__init__()
+        super(Res2Net, self).__init__()
         self.inplanes = m_channels
         self.base_width = base_width
         self.scale = scale
@@ -131,7 +129,6 @@ class Res2Netmul(nn.Module):
             raise Exception(f'没有{pooling_type}池化层！')
 
         self.fc = nn.Linear(embd_dim, num_class)
-        self.sigmoid = nn.Sigmoid()  # For multi-label classification
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -176,30 +173,5 @@ class Res2Netmul(nn.Module):
         x = self.linear(x)
         x = self.bn3(x)
 
-        x = self.fc(x)
-        out = self.sigmoid(x)
+        out = self.fc(x)
         return out
-    
-
-if __name__ == '__main__':
-    # 创建一个随机输入
-    # 手动设置 Graphviz 可执行文件的路径
-    os.environ["PATH"] += os.pathsep + 'C:/Program Files/Graphviz/bin'
-
-    model = Res2Netmul(4,32)
-    x = torch.randn(32, 51,32)
-
-    # 生成计算图
-    y = model(x)
-    dot = make_dot(y, params=dict(model.named_parameters()))
-
-    # 保存图像
-    # 打印当前工作目录
-    # 指定保存路径
-    save_path = os.getcwd()
-
-    # 如果目录不存在，则创建它
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    print(os.getcwd())
-    dot.format = 'png'
-    dot.render('network_structure')

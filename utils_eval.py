@@ -66,13 +66,14 @@ def evaluate_results(all_preds, all_targets, class_labels, model_info, save_matr
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0
         recall = tp / (tp + fn) if (tp + fn) > 0 else 0
         accuracy = (tp + tn) / (tp + tn + fp + fn) if (tp + tn + fp + fn) > 0 else 0
-        output_string = f'Precision: {precision:.5f}, Recall: {recall:.5f}, Accuracy: {accuracy:.5f}'
+        f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+        output_string = f'Precision: {precision:.5f}, Recall: {recall:.5f}, F1:{f1:.5f}, Accuracy: {accuracy:.5f}'
         print(f'Label: {class_labels[i]} - {output_string}')
 
         if not plot: 
             continue
         plt.figure(figsize=(10, 8))
-        sns.heatmap(matrix, annot=True, fmt='d', cmap='Blues', vmin=0, vmax=600, cbar=False)
+        sns.heatmap(matrix, annot=True, fmt='d', cmap='Blues', vmin=0, vmax=3500, cbar=False)
         plt.xlabel('Predicted')
         plt.ylabel('True')
         # plt.title(f'Confusion Matrix for Label {class_labels[i]} - {output_string}\n{model_info}')
@@ -110,7 +111,7 @@ def print_combined_multilabel_confusion_matrix(path, y_true, y_pred, labels_idx,
     plt.rcParams.update({'font.size': 14})
     plt.figure(figsize=(10, 8))
     ax = sns.heatmap(combined_cm, annot=True, fmt='d', cmap='Blues', 
-                        xticklabels=label_combinations, yticklabels=label_combinations, vmax=300, vmin=0, cbar=False)
+                        xticklabels=label_combinations, yticklabels=label_combinations, vmax=2500, vmin=0, cbar=False)
     ax.tick_params(axis='both', which='major', labelsize=14)
     plt.xlabel('Predicted')
     plt.ylabel('True')

@@ -25,11 +25,23 @@ from YOLO.create_data_yolo import normalize_audio
 from YOLO.infer_yolo import YOLOMultiLabelClassifier, load_cached, segment_audios
 from concurrent.futures import ProcessPoolExecutor
     
-def _infer_cnn(args, audios, sample_rate):
+def _infer_cnn(audios, sample_rate):
+    """
+    Perform inference using the CNN model on a list of audio segments.
+
+    Args:
+        audios (list): A list of audio data arrays.
+        sample_rate (int): The sample rate of the audio data.
+
+    Returns:
+    tuple: A tuple containing:
+        - preds (list): The predicted labels or outputs from the CNN model.
+        - outs (list): The raw outputs from the CNN model.
+        - None: Placeholder for additional return values (currently None).
+    """
     audios = [AudioSegment.from_ndarray(audio, sample_rate) for audio in audios]
-    trainer = MAClsTrainer(configs=args.configs, use_gpu=args.use_gpu)
-    outs, preds = trainer.predict(audios,resume_model=args.resume_model)
-    return preds,outs
+    outs, preds = cnn_model.predict(audios,resume_model=args.resume_model)
+    return preds,outs,None
 
 def _infer_yolo(audios, sample_rate):
     """
@@ -43,10 +55,10 @@ def _infer_yolo(audios, sample_rate):
         sample_rate (int): The sample rate of the audio samples.
 
     Returns:
-        tuple: A tuple containing:
-            - np.array: Array of predictions for each audio sample.
-            - list: List of bounding boxes for each prediction.
-            - list: List of total vocaliztions for each audio sample.
+    tuple: A tuple containing:
+        - np.array: Array of predictions for each audio sample.
+        - list: List of bounding boxes for each prediction.
+        - list: List of total vocaliztions for each audio sample.
     """
     audios = [normalize_audio(audio) for audio in audios]
     # persistant executor to speed up spectrogram creation
@@ -85,12 +97,11 @@ def _save_array_list(path, arrays: list[np.ndarray]):
     array_with_idx = np.vstack(arrays_with_idx, dtype=np.float32) if len(arrays_with_idx) > 0 else np.array([], dtype=np.float32)
     np.savez_compressed(path, boxes_with_segment_idx=array_with_idx)
 
-def infer(args, path: str, out_path=None, skip_existing=True, save_box_preds=False, extract_timestamps=True):
+def infer(path: str, out_path=None, skip_existing=True, save_box_preds=False, extract_timestamps=True):
     """
     Perform inference on audio files and save the results.
 
     Parameters:
-    args (Namespace): Arguments required for the CNN inference model.
     path (str): Path to the input file or directory containing audio files. 
                 It can be one of the following: 
 
@@ -124,7 +135,7 @@ def infer(args, path: str, out_path=None, skip_existing=True, save_box_preds=Fal
     print("processing", name)
     if out_path is None:
         times, audios, sample_rate = segment_audios(paths, extract_timestamps=extract_timestamps)
-        preds, _, _ = _infer_yolo(audios, sample_rate)
+        preds, _, _ = _infer_model(audios, sample_rate)
         return preds, times
 
     out_times, out_preds, out_boxes, out_bpreds = f'{out_path}/{name}_times.npz', f'{out_path}/{name}_preds.npz', f'{out_path}/{name}_boxes.npz', f'{out_path}/{name}_boxpreds.npy'
@@ -134,8 +145,7 @@ def infer(args, path: str, out_path=None, skip_existing=True, save_box_preds=Fal
 
     times, audios, sample_rate = segment_audios(paths)
 
-    #preds, boxes = infer_cnn(args, audios, sample_rate)
-    preds, boxes, box_preds = _infer_yolo(audios, sample_rate)
+    preds, boxes, box_preds = _infer_model(audios, sample_rate)
     _save_array_list(out_boxes, boxes)
     np.savez_compressed(out_times, times=times)
     np.savez_compressed(out_preds, preds=preds)
@@ -394,7 +404,7 @@ def analyze_by_day(in_path: str, n_boot=1, aggregation_interval_minutes=10, star
     """
     print(f"Analyzing {in_path}")
     if in_path.lower().endswith('.wav'):
-        preds, times = infer(args, path=in_path, out_path=None, skip_existing=True, extract_timestamps=False)
+        preds, times = infer(path=in_path, out_path=None, skip_existing=True, extract_timestamps=False)
         times = np.array(times) + start_time_s
         in_path = in_path[:-len('.wav')]
     else:
@@ -434,7 +444,7 @@ def infer_all(in_path, out_path, skip_existing=True):
         dirs = sorted(dirs)
         for d in tqdm(dirs):
             p = os.path.join(root, d)
-            infer(args, path=p, out_path=out_path, skip_existing=skip_existing)
+            infer(path=p, out_path=out_path, skip_existing=skip_existing)
 
 def _get_true_counts(path_to_selection_table):
     """
@@ -517,7 +527,7 @@ def plot_against_validation_data(validation_path, dest = f"data/validation_analy
     for f in sorted(os.listdir(validation_path)):
         p = os.path.join(validation_path, f)
         if f.endswith('.wav'):
-            infer(args, path=p, out_path=dest, skip_existing=skip_existing, save_box_preds=True)
+            infer(path=p, out_path=dest, skip_existing=skip_existing, save_box_preds=True)
         if f.endswith('Table.1.selections.txt'):
             shutil.copy(p, os.path.join(dest, f))
 
@@ -718,18 +728,23 @@ def parse_args():
     """Parses args for the CNN inference model."""
     parser = argparse.ArgumentParser(description=__doc__)
     add_arg = functools.partial(add_arguments, argparser=parser)
-    add_arg('configs',          str,   'CNN/configs/fish3.yml',         "Configs")
-    add_arg("use_gpu",          bool,  True,                        "USe GPU or not")
-    add_arg('resume_model',     str,   'CNN/models//Res18_MelSpectrogram/best_model/',  "model path")
+    add_arg('configs',          str,   'CNN/configs/fish3.yml',         "configure")
+    add_arg("use_gpu",          bool,  True,                        "use gpu")
+    add_arg('save_matrix_path', str,   'CNN/output/images/',            "save_matrix_path")
+    add_arg('resume_model',     str,   'CNN/models_trained/Res18lstm_MelSpectrogram/best_model',  "model path")
+    add_arg('output_txt',     str,   'CNN/outputs/test54_e.txt',  "txt path")
     args = parser.parse_args()
     return args
 
 if __name__ == '__main__':
     np.random.seed(42)
     args = parse_args()
+    cnn_model = MAClsTrainer(configs=args.configs, use_gpu=args.use_gpu)
     yolo_model = YOLOMultiLabelClassifier("YOLO/final_model/weights",)
     in_path = 'convert_to_wav/wav'
     out_path = 'data/analyzed'
+
+    _infer_model = _infer_yolo # set to _infer_cnn or _infer_yolo
 
     #----------------------------------------------------------------------#
     # Comment the functions you don't want to run. 
@@ -737,7 +752,7 @@ if __name__ == '__main__':
     #----------------------------------------------------------------------#
 
     # infer_all(in_path, out_path)
-    # infer(args, path=f"{in_path}/20210707", out_path=out_path,skip_existing=True)
+    # infer(path=f"{in_path}/20210707", out_path=out_path,skip_existing=True)
 
     analyze_by_day('YOLO/labeled_data/train/audio/Montijo_20210712_0.wav', 
                    aggregation_interval_minutes=1, start_time_s=0, file_ending='.pdf')

@@ -10,7 +10,17 @@ logger_initialized = []
 
 
 def setup_logger(name, output=None):
+    """
+    Initialize logger and set its verbosity level to INFO.
+    Args:
+        output (str): a file name or a directory to save log. If None, will not save log file.
+            If ends with ".txt" or ".log", assumed to be a file name.
+            Otherwise, logs will be saved to `output/log.txt`.
+        name (str): the root module name of this logger
 
+    Returns:
+        logging.Logger: a logger
+    """
     logger = logging.getLogger(name)
     if name in logger_initialized:
         return logger

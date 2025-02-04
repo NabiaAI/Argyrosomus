@@ -575,7 +575,7 @@ if __name__ == '__main__':
     # --- EXAMPLE USAGE ---
 
     # create long-term spectrogram
-    create_long_term_spectrogram("../convert_to_wav/wav/", "20170419")
+    # create_long_term_spectrogram("../convert_to_wav/wav/", "20210427")
 
     # cut file to specific time and move predictions
     # start_time = 0
