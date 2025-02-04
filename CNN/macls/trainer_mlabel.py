@@ -393,7 +393,7 @@ class MAClsTrainer(object):
         if isinstance(configs, str):
             with open(configs, 'r', encoding='utf-8') as f:
                 configs = yaml.load(f.read(), Loader=yaml.FullLoader)
-            print_arguments(configs=configs)
+            #print_arguments(configs=configs)
         self.configs = dict_to_object(configs)
         assert self.configs.use_model in SUPPORT_MODEL, f'No such model：{self.configs.use_model}'
         self.model = None

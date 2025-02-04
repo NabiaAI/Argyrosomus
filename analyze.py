@@ -309,7 +309,7 @@ def aggregate_over_time(preds:np.ndarray, times:np.ndarray, n_boot=1, aggregatio
     if verbose:
         iterator = tqdm(list(iterator))
 
-    max_segments = aggr_interval_s//5
+    max_segments = aggr_interval_s//seg_dur_s
 
     lb = 0 # lower bound search space; this is done to improve efficiency by not searching the entire array
     for i, t in iterator:
@@ -327,7 +327,7 @@ def aggregate_over_time(preds:np.ndarray, times:np.ndarray, n_boot=1, aggregatio
 
         # Do not change the order of the next 4 lines light-heartedly
         max_idx = indices.max()
-        indices = indices[:max_segments] # limit to 1 sample per 5 seconds
+        indices = indices[:max_segments] # limit to 1 sample per seg_dur_s seconds
         batch = preds[lb:ub][indices]
         lb += max_idx + 1
 
@@ -448,7 +448,7 @@ def infer_all(in_path, out_path, skip_existing=True):
 
 def _get_true_counts(path_to_selection_table):
     """
-    Calculate the true counts of fish sounds in segments of 5 seconds from a Raven selection table.
+    Calculate the true counts of fish sounds in segments of seg_dur_s seconds from a Raven selection table.
 
     Parameters:
         path_to_selection_table (str): The file path to the selection table in CSV format.
@@ -469,8 +469,8 @@ def _get_true_counts(path_to_selection_table):
         return np.array([0,0,0]), np.array([0,0,0])
 
     labels = []
-    for start_time in range(0, int(df['End Time (s)'].max())+10, 5): # loop over segments of 5 seconds
-        end_time = start_time + 5
+    for start_time in range(0, int(df['End Time (s)'].max())+10, seg_dur_s): # loop over segments of seg_dur_s seconds
+        end_time = start_time + seg_dur_s
         segment = df[
             (df['End Time (s)'] > start_time) & 
             (df['Begin Time (s)'] < end_time)
@@ -745,6 +745,7 @@ if __name__ == '__main__':
     out_path = 'data/analyzed'
 
     _infer_model = _infer_yolo # set to _infer_cnn or _infer_yolo
+    seg_dur_s = 3 # segment duration in seconds; THIS MUST MATCH YOUR EXISTING DATA
 
     #----------------------------------------------------------------------#
     # Comment the functions you don't want to run. 
@@ -762,6 +763,6 @@ if __name__ == '__main__':
     # compute_count_over_years(out_path, "data")
     # print_dial_plot("data")
 
-    # plot_against_validation_data('YOLO/data/validation/audio', skip_existing=True)
+    plot_against_validation_data('YOLO/labeled_data/validation/audio', skip_existing=False)
 
     # plot_over_time("data", use_cached=True, only_every_nth_day=7, smoothing_window=40)

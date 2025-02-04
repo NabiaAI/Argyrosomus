@@ -13,6 +13,8 @@ import pandas as pd
 sys.path.append('.')
 from create_data_yolo import save_spectrogram, read_audio_file, normalize_audio, extract_time_stamp
 
+seg_dur_s = 3 # default segment duration in seconds
+
 def y_coord_to_freq(coord):
     # coord = freq / (sr / n_fft) # sr / n_fft = is size of each bin
     # => freq = coord * (sr / n_fft)
@@ -71,12 +73,12 @@ def convert_to_raven_selection_table(input_array, names, time_shift=0, img_heigh
     ]
     return pd.DataFrame(data, columns=columns)
 
-def segment_audios(file_paths, segment_duration=5, stride=None, extract_timestamps=True):
+def segment_audios(file_paths, segment_duration=seg_dur_s, stride=None, extract_timestamps=True):
     """
     Segments audio files into smaller chunks of specified duration.
     Parameters:
         file_paths (list of str): List of paths to the audio files to be segmented.
-        segment_duration (int, optional): Duration of each segment in seconds. Default is 5 seconds.
+        segment_duration (int, optional): Duration of each segment in seconds. Default is seg_dur_s seconds.
         stride (int, optional): Step size in seconds between the start of each segment. If None, it defaults to segment_duration. Default is None.
         extract_timestamps (bool, optional): Whether to extract timestamps from the file names. Default is True.
     Returns:
@@ -202,6 +204,7 @@ def numpy_audio_to_spectrogram(audio, sr, target_duration=5):
     - If the length of the audio is greater than the target duration, it will be cropped.
     - A warning will be printed if the audio is longer than the target duration.
     """
+    target_duration=5 # TODO: remove this when model was trained again on 3s
     if len(audio) < target_duration * sr:
         length = int(target_duration * sr)
         audio = np.pad(audio, (0, length - len(audio)), 'constant')
@@ -269,7 +272,7 @@ def load_list(input):
         print(f"WARNING: Skipped {skipped} files which did not exist")
     return audio_list, labels_list, srs
 
-def audios_to_spectrograms(audios: list[np.array], srs, target_duration, executor=None, use_tqdm=True): # TODO: split audio if its too long
+def audios_to_spectrograms(audios: list[np.array], srs, target_duration, executor=None, use_tqdm=True):
     """
     Converts a list of audio signals into their corresponding spectrograms using multi-processing.
 
@@ -309,7 +312,7 @@ def audios_to_spectrograms(audios: list[np.array], srs, target_duration, executo
     spectrogram_list = np.array(spectrogram_list)[idx]
     return spectrogram_list
 
-def load_cached(input, cache_path=None, min_duration_s=0.1, target_duration_s=5, no_labels=False, sr=None, executor=None, use_tqdm=True):
+def load_cached(input, cache_path=None, min_duration_s=0.1, target_duration_s=seg_dur_s, no_labels=False, sr=None, executor=None, use_tqdm=True):
     """
     Load cached spectrograms and labels or generate them from audio input.
 
@@ -320,7 +323,7 @@ def load_cached(input, cache_path=None, min_duration_s=0.1, target_duration_s=5,
     cache_path (str, optional): Path to the cache directory. If provided, the function will attempt to load cached data.
     min_duration_s (float, optional): Minimum duration of audio segments to be considered. Default is 0.1 seconds.
     target_duration_s (float, optional): Target duration for each spectrogram. 
-        Shorter audios will be padded with zeroes, longer audios will be cropped. Default is 5 seconds.
+        Shorter audios will be padded with zeroes, longer audios will be cropped. Default is seg_dur_s seconds.
     no_labels (bool, optional): If True, labels will not be loaded or saved. Default is False.
     sr (int, optional): Sample rate of the audio data. Must be provided if input is a list of numpy arrays.
     executor (concurrent.futures.Executor, optional): Executor for parallel processing. 
@@ -408,7 +411,7 @@ class YOLOMultiLabelClassifier:
             self._model = model_path
         self.bounding_box_threshold = bounding_box_threshold
         self.device = device
-        self.imgsz = (64,320) # based on 4khz audio with 5s duration up to 1000 Hz
+        self.imgsz = (64,320) # based on 4khz audio with 5s duration up to 1000 Hz. Must be multiple of 32
         self.iou=0.5
         self.label_indices = {'lt':0, 'm':1, 'w':2}
         self.threshold_meagre_hz = 100
@@ -458,7 +461,7 @@ class YOLOMultiLabelClassifier:
     
     def predict_file(self, file_path, *, save=False, raven_table=False, threshold_boxes=False, return_box_predictions=False):
         """
-        Predicts an audio file of any length by cutting the file into 5 second segments and using `predict` on those segments. 
+        Predicts an audio file of any length by cutting the file into seg_dur_s second segments and using `predict` on those segments. 
         Optionally saves the predicted bounding boxes as Raven selection tables next to the input file.
 
         Parameters:
@@ -470,9 +473,9 @@ class YOLOMultiLabelClassifier:
             return_box_predictions (bool, optional): If True, returns the box predictions (see `predict` for details). Defaults to False.
 
         Returns:
-            tuple: See `predict` for details. The length of the returned arrays is equal to the number of 5-second segments.
+            tuple: See `predict` for details. The length of the returned arrays is equal to the number of seg_dur_s-second segments.
         """
-        segment_duration = 5
+        segment_duration = seg_dur_s
         _, audios, sr = segment_audios([file_path], segment_duration=segment_duration, extract_timestamps=False)
         audios = [normalize_audio(audio) for audio in audios]
         spectrogram = load_cached(audios, cache_path=None, sr=sr, no_labels=True)
@@ -540,6 +543,10 @@ class YOLOMultiLabelClassifier:
         """
         if isinstance(input, np.ndarray) and input.ndim > 3 or isinstance(input, list) and isinstance(input[0], np.ndarray):
             input = [spectro[...,::-1] for spectro in input]
+
+        for e in input:
+            rounded_32 = (math.ceil(e.shape[0] / 32) * 32, math.ceil(e.shape[1] / 32) * 32)
+            assert rounded_32 == self.imgsz, f"Expected shape {self.imgsz}, got 32-rounded {rounded_32}"
         
         # transorm into tensors of batch size
         n_batches = math.ceil(len(input) / batch_size)

@@ -11,7 +11,7 @@ import utils_eval as eval
 
 model_path = "final_model/weights"
 device = 'mps'
-save_examples = True
+save_examples = False
 bb_threshold = 0.25
 thresholds = None # None = use saved thresholds # [0.25585734844207764, 0.6342101693153381, 0.28556814789772034] [0.2535114586353302, 0.2733498811721802, 0.28548818826675415]
 

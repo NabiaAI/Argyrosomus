@@ -18,8 +18,8 @@ np.random.seed(42)
 debug = False
 total_labels = 0
 
-segment_duration = 5  # segment duration in seconds
-stride = 5  # stride in seconds
+segment_duration = 3  # segment duration in seconds
+stride = 3  # stride in seconds
 
 # Define the mapping of labels to indices
 CATEGORY_MAPPING = {

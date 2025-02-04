@@ -23,9 +23,10 @@ if __name__ == '__main__':
         "mixup":0.2,
     }
     device = 'mps'
+    imgsz=(64,320) # based on 1000Hz and 5s audio. MUST FIT WITH duration of audios must be multiple of 32
 
     model = YOLO(pretrained)
-    model.train(data='data.yaml', epochs=100, patience=20, device=device, plots=True, imgsz=(64,320), **augmentations) # cache='disk' (default False)
+    model.train(data='data.yaml', epochs=100, patience=20, device=device, plots=True, imgsz=imgsz, **augmentations) # cache='disk' (default False)
 
     # # Resume training
     # model = YOLO(f"{train_path}/weights/last.pt")  # load a partially trained model
