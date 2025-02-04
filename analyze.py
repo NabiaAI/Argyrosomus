@@ -85,7 +85,7 @@ def _save_array_list(path, arrays: list[np.ndarray]):
     array_with_idx = np.vstack(arrays_with_idx, dtype=np.float32) if len(arrays_with_idx) > 0 else np.array([], dtype=np.float32)
     np.savez_compressed(path, boxes_with_segment_idx=array_with_idx)
 
-def infer(args, path: str, out_path, skip_existing=True, save_box_preds=False):
+def infer(args, path: str, out_path=None, skip_existing=True, save_box_preds=False, extract_timestamps=True):
     """
     Perform inference on audio files and save the results.
 
@@ -100,6 +100,9 @@ def infer(args, path: str, out_path, skip_existing=True, save_box_preds=False):
     out_path (str): Path to the directory where output files will be saved.
     skip_existing (bool, optional): If True, skip processing if output files already exist. Default is True.
     save_box_preds (bool, optional): If True, save box predictions, which are total vocalizations. Default is False.
+    extract_timestamps (bool, optional): If True, extract timestamps from the audio files. 
+                If False, 0s since begin of the day is assumed. Default is True.
+    Returns: (preds, times) or (None, None) if inference is skipped.
     """
     if os.path.isfile(path):
         if path.endswith('.txt'):
@@ -115,15 +118,20 @@ def infer(args, path: str, out_path, skip_existing=True, save_box_preds=False):
         name = path.split('/')[-1]
         if name.startswith('.'):
             print(f"Skipping {name} as it is a hidden directory")
-            return
+            return None, None
     paths = sorted(paths)
     
+    print("processing", name)
+    if out_path is None:
+        times, audios, sample_rate = segment_audios(paths, extract_timestamps=extract_timestamps)
+        preds, _, _ = _infer_yolo(audios, sample_rate)
+        return preds, times
+
     out_times, out_preds, out_boxes, out_bpreds = f'{out_path}/{name}_times.npz', f'{out_path}/{name}_preds.npz', f'{out_path}/{name}_boxes.npz', f'{out_path}/{name}_boxpreds.npy'
     if os.path.exists(out_times) and os.path.exists(out_preds) and skip_existing:
         print(f"Skipping {name} as output files already exist")
-        return
+        return None, None
 
-    print("processing", name)
     times, audios, sample_rate = segment_audios(paths)
 
     #preds, boxes = infer_cnn(args, audios, sample_rate)
@@ -133,6 +141,7 @@ def infer(args, path: str, out_path, skip_existing=True, save_box_preds=False):
     np.savez_compressed(out_preds, preds=preds)
     if save_box_preds:
         np.save(out_bpreds, box_preds)
+    return preds, times
 
 def _get_full_path_of_audio_files(audio_path):
     audio_files = {}
@@ -205,7 +214,18 @@ def _smooth_and_plot(x, y, window_size, label, color, only_moving_average=False)
     # Plot the smoothed line
     plt.plot(xnew, y_smooth_spline, color=color, label=label, alpha=0.3)
 
-def _plot_analysis(all_ratios, all_m_w_counts, n_boot, batch_number, slope, slope_ci, intercept, r_value, trend_str, path):
+def _plot_analysis(all_ratios, all_m_w_counts, n_boot, batch_number, path, file_ending='.pdf'):
+    """
+    Plots analysis of counts with optional bootstrapping.
+
+    Parameters:
+    all_ratios (numpy.ndarray): Array of ratios to be plotted.
+    all_m_w_counts (numpy.ndarray): Array of counts corresponding to the ratios.
+    n_boot (int): Number of bootstrap samples. If 1, no bootstrapping was performed for all_ratios and all_m_w_coutns.
+    batch_number (int): Batch number used to determine the number of samples.
+    path (str): Path to save the plot.
+    file_ending (str, optional): File extension for the saved plot. Default is '.pdf' (vector graphic).
+    """
     if n_boot == 1:
         chosen_idxes = np.arange(all_ratios.shape[0])
     else: 
@@ -227,18 +247,18 @@ def _plot_analysis(all_ratios, all_m_w_counts, n_boot, batch_number, slope, slop
 
     # Plot smoothed lines 
     window_size = 10  # Adjust the window size as needed
-    _smooth_and_plot(plt_ratios[:,0], plt_lt_m_w[:,0], window_size, None, 'orange')
-    _smooth_and_plot(plt_ratios[:,0], plt_lt_m_w[:,1], window_size, None, 'green')
-    _smooth_and_plot(plt_ratios[:,0], plt_lt_m_w[:,2], window_size, None, 'red')
+    _smooth_and_plot(plt_ratios[:,0], plt_lt_m_w[:,0], window_size, None, 'orange', only_moving_average=True)
+    _smooth_and_plot(plt_ratios[:,0], plt_lt_m_w[:,1], window_size, None, 'green', only_moving_average=True)
+    _smooth_and_plot(plt_ratios[:,0], plt_lt_m_w[:,2], window_size, None, 'red', only_moving_average=True)
 
     ax2.set_ylabel('Counts'), ax2.legend(fontsize='small')
     plt.grid(axis='x', alpha=0.2)
 
     #plt.xticks(np.arange(batch_number), np.arange(batch_number) + 2015)
-    CI_str = f"(95%CI: [{slope_ci[0]:.3f}, {slope_ci[1]:.3f}])"if n_boot > 1 else ""
+    #CI_str = f"(95%CI: [{slope_ci[0]:.3f}, {slope_ci[1]:.3f}])"if n_boot > 1 else ""
     #plt.text(0.03, 0.83, f'r: {r_value:.3f} (r²: {r_value**2:.3f}), slope {slope:.3f} {CI_str}', transform=plt.gca().transAxes, fontsize=12, verticalalignment='top')
     #plt.text(0.03, 0.79, trend_str, transform=plt.gca().transAxes, fontsize=12, verticalalignment='top')
-    plt.savefig(f'{path}_daily.pdf', bbox_inches='tight', pad_inches=0)
+    plt.savefig(f'{path}_daily{file_ending}', bbox_inches='tight', pad_inches=0)
     plt.close()
 
 def aggregate_over_time(preds:np.ndarray, times:np.ndarray, n_boot=1, aggregation_interval_minutes = 10, fill_missing_with_NaN=False, min_time=None, max_time=None, verbose=False):
@@ -272,8 +292,8 @@ def aggregate_over_time(preds:np.ndarray, times:np.ndarray, n_boot=1, aggregatio
     all_ratios = []
     all_lt_m_w_counts = []
     all_times = []
-    if min_time is None: min_time = times.min()
-    if max_time is None: max_time = times.max()
+    if min_time is None: min_time = int(times.min())
+    if max_time is None: max_time = int(times.max())
 
     iterator = enumerate(range(min_time, max_time, aggr_interval_s))
     if verbose:
@@ -311,42 +331,17 @@ def aggregate_over_time(preds:np.ndarray, times:np.ndarray, n_boot=1, aggregatio
         all_lt_m_w_counts.append(lt_m_w_counts)
     return all_ratios, all_lt_m_w_counts, all_times
 
-
-def analyze_by_day(in_path, n_boot=1):
+def _analyze_trend_ratios(all_ratios, all_times, n_boot=1):
     """
-    Analyzes prediction data by day and performs statistical trend tests over the day and plotting.
-
-    The function performs the following steps:
-    1. Loads prediction and time data from .npz files.
-    2. Filters out invalid times that are not within a day.
-    3. Aggregates data over time and calculates ratios.
-    4. Computes slopes using linear regression for each bootstrap sample.
-    5. Performs Mann-Kendall monotonic trend test.
-    6. Calculates confidence intervals for the slopes if n_boot > 1.
-    7. Prints statistical results including slope, r-value, p-value, and trend.
-    8. Plots the analysis results as graph of counts over the day.
-
+    Analyzes statistical trends in the provided ratio data using linear regression and Mann-Kendall test.
     Parameters:
-    in_path (str): The input path to the prediction and time data files.
-    n_boot (int, optional): The number of bootstrap samples to use for slope estimation. Default is 1.
-
+    all_ratios (list of arrays): A list where each element is a ratio of m/w corresponding to different times.
+    all_times (list): A list of time points corresponding to the data in all_ratios.
+    n_boot (int, optional): Number of bootstrap samples used to generate confidence interval estimation. Default is 1.
     Returns:
-    np.ndarray: An array of counts of each fish species over time intervals. Shape is (n, 3) where n is 
-    the number of time intervals.
+    None: This function prints the results of the statistical analysis, including the Mann-Kendall test results,
+          linear regression slope, confidence intervals, and trend interpretation.
     """
-    print(f"Analyzing {in_path}")
-    preds = np.load(f'{in_path}_preds.npz')['preds'] # shape (n, 3)
-    times = np.load(f'{in_path}_times.npz')['times'] # shape (n,) in seconds of the day
-    if len(preds) == 0:
-        print(f"No preds in {in_path}")
-        return np.zeros((1, 3))
-    valid_times = (0 <= times) & (times < 23 * 3600 + 59 * 60 + 59) # only keep times within a day
-    preds = preds[valid_times]
-    times = times[valid_times]
-
-    all_ratios, all_lt_m_w_counts, all_times = aggregate_over_time(preds, times, n_boot=n_boot)
-    batch_number = len(all_times)
-
     all_ratios = [np.vstack([np.ones_like(ratios) * time / 3600, ratios]).T for time, ratios in zip(all_times, all_ratios)]
 
     slopes = []
@@ -359,7 +354,6 @@ def analyze_by_day(in_path, n_boot=1):
     print(f"Mann-Kendall monotony test: trend: {mannkendall.trend}, tau={mannkendall.Tau:.3f}, p-value={mannkendall.p:.3f}, slope={mannkendall.slope:.3f}")
 
     all_ratios = np.vstack(all_ratios)
-    all_lt_m_w_counts = np.vstack(all_lt_m_w_counts)
     slopes = np.array(slopes)
     slope_ci = (np.percentile(slopes, 2.5), np.percentile(slopes, 97.5))
 
@@ -371,11 +365,60 @@ def analyze_by_day(in_path, n_boot=1):
         trend_str = "Trend: " + ("increasing" if slope_ci[0] > 0 else "decreasing" if slope_ci[1] < 0 else "no significant trend")
     else:
         print(f"Slope: {slope:.3f}, r-value: {r_value:.3f}, p-value: {p_value:.3f}")
-        trend_str = "Trend: " + ("increasing" if slope > 0 and p_value < 0.05 else "decreasing" if slope < 0 and p_value < 0.05 else "no significant trend") + f" (p: {p_value:.3f})"
-    
+        trend_str = "Trend: " + ("increasing" if slope > 0 and p_value < 0.05 else "decreasing" if slope < 0 and p_value < 0.05 else "no significant trend") + f" (p: {p_value:.3f})"  
     print(trend_str)
 
-    _plot_analysis(all_ratios, all_lt_m_w_counts, n_boot, batch_number, slope, slope_ci, intercept, r_value, trend_str, path=in_path)
+def analyze_by_day(in_path: str, n_boot=1, aggregation_interval_minutes=10, start_time_s=0, file_ending='.pdf'):
+    """
+    Analyzes prediction data by day and performs plotting of day. If the input path is a `.wav` file,
+    the function infers prediction and time data directly. Otherwise, it loads the prediction and time data.
+    If input is `.wav` file, the start time of the audio can be specified in seconds.
+
+    The function performs the following steps:
+    1. Loads prediction and time data from .npz files or infers them directly if in_path is `.wav` file.
+    2. Filters out invalid times that are not within a day.
+    3. Aggregates data over time and calculates ratios.
+    4. Plots the analysis results as graph of counts over the day.
+
+    Parameters:
+    in_path (str): The input path to the prediction and time data files.
+    n_boot (int, optional): The number of bootstrap samples to use for slope estimation. Default is 1.
+    aggregation_interval_minutes (int, optional): The time interval in minutes for aggregating the data. Default is 10.
+    start_time_s (int, optional): The start time (of the audio) in seconds of the day. Only active if in_path is `.wav`,
+        since otherwise times were extracted from the file name during inference. Default is 0.
+    file_ending (str, optional): The file extension for the saved plot. Default is '.pdf' (vector graphic).
+
+    Returns:
+    np.ndarray: An array of counts of each fish species over time intervals. Shape is (n, 3) where n is 
+    the number of time intervals.
+    """
+    print(f"Analyzing {in_path}")
+    if in_path.lower().endswith('.wav'):
+        preds, times = infer(args, path=in_path, out_path=None, skip_existing=True, extract_timestamps=False)
+        times = np.array(times) + start_time_s
+        in_path = in_path[:-len('.wav')]
+    else:
+        preds = np.load(f'{in_path}_preds.npz')['preds'] # shape (n, 3)
+        times = np.load(f'{in_path}_times.npz')['times'] # shape (n,) in seconds of the day
+    if len(preds) == 0:
+        print(f"No preds in {in_path}")
+        return np.zeros((1, 3))
+    valid_times = (0 <= times) & (times < 23 * 3600 + 59 * 60 + 59) # only keep times within a day
+    preds = preds[valid_times]
+    times = times[valid_times]
+
+    all_ratios, all_lt_m_w_counts, all_times = aggregate_over_time(preds, times, n_boot=n_boot, 
+                                                                   aggregation_interval_minutes=aggregation_interval_minutes)
+    batch_number = len(all_times)
+
+    # _analyze_trend_ratios(all_ratios, all_times, n_boot=n_boot)
+
+    # append times to ratios for plotting
+    all_ratios = [np.vstack([np.ones_like(ratios) * time / 3600, ratios]).T for time, ratios in zip(all_times, all_ratios)]
+    all_ratios = np.vstack(all_ratios)
+    all_lt_m_w_counts = np.vstack(all_lt_m_w_counts)
+
+    _plot_analysis(all_ratios, all_lt_m_w_counts, n_boot, batch_number, path=in_path, file_ending=file_ending)
     return all_lt_m_w_counts
 
 def infer_all(in_path, out_path, skip_existing=True):
@@ -696,11 +739,14 @@ if __name__ == '__main__':
     # infer_all(in_path, out_path)
     # infer(args, path=f"{in_path}/20210707", out_path=out_path,skip_existing=True)
 
-    # analyze_all_days_by_day(out_path)
+    analyze_by_day('YOLO/labeled_data/train/audio/Montijo_20210712_0.wav', 
+                   aggregation_interval_minutes=1, start_time_s=0, file_ending='.pdf')
+
+    # analyze_all_days_by_day('data/analyzed_subset')
 
     # compute_count_over_years(out_path, "data")
     # print_dial_plot("data")
 
     # plot_against_validation_data('YOLO/data/validation/audio', skip_existing=True)
 
-    plot_over_time("data", use_cached=True, only_every_nth_day=7, smoothing_window=40)
+    # plot_over_time("data", use_cached=True, only_every_nth_day=7, smoothing_window=40)
