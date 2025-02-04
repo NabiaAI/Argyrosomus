@@ -754,8 +754,8 @@ if __name__ == '__main__':
     # infer_all(in_path, out_path)
     # infer(path=f"{in_path}/20210707", out_path=out_path,skip_existing=True)
 
-    analyze_by_day('YOLO/labeled_data/train/audio/Montijo_20210712_0.wav', 
-                   aggregation_interval_minutes=1, start_time_s=0, file_ending='.pdf')
+    # analyze_by_day('YOLO/labeled_data/train/audio/Montijo_20210712_0.wav', 
+    #                aggregation_interval_minutes=1, start_time_s=0, file_ending='.pdf')
 
     # analyze_all_days_by_day('data/analyzed_subset')
 
