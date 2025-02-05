@@ -9,45 +9,52 @@ from sklearn.metrics import multilabel_confusion_matrix, roc_curve, auc
 
 np.random.seed(0)
 
-def plot_validation_output(dates, sums, true_counts, save_path):
+def plot_validation_output(dates, sums1, sums2, true_counts, save_path):
     plt.rcdefaults()
-    plt.figure(figsize=(14,6))
+    plt.figure(figsize=(12,4))
+    plt.rcParams.update({'font.size': 14})
     true_counts = true_counts - 0.5 # to make the plot more readable
-    for num, color in zip([0, 1, 2], ['orange', 'green', 'red']):
-        for d, yone, ytwo in zip(dates, sums[:,num], true_counts[:,num]):
-            plt.plot([d, d], [yone, ytwo], marker="", color=color, linestyle=":", linewidth=1)
+    for sums, line_sytle, marker, label in zip([sums1, sums2], [':', '--'], ['v', 'o'], ['YOLO', 'CNN']):
+        if sums is None:
+            continue
 
-    plt.scatter(dates, sums[:,0], label='lt YOLO', marker="v",  color='orange')
-    plt.scatter(dates, sums[:,1], label='m YOLO', marker="v", color='green')
-    plt.scatter(dates, sums[:,2], label='w YOLO', marker="v", color='red')
+        for num, color in zip([0, 1, 2], ['orange', 'green', 'red']):
+            for d, yone, ytwo in zip(dates, sums[:,num], true_counts[:,num]):
+                plt.plot([d, d], [yone, ytwo], marker="", color=color, linestyle=line_sytle, linewidth=1)
+
+        plt.scatter(dates, sums[:,0], label=f'lt {label}', marker=marker,  color='orange')
+        plt.scatter(dates, sums[:,1], label=f'm {label}', marker=marker, color='green')
+        plt.scatter(dates, sums[:,2], label=f'w {label}', marker=marker, color='red')
+
     plt.scatter(dates, true_counts[:,0], label='lt gt', marker="*",  color='orange')
     plt.scatter(dates, true_counts[:,1], label='m gt', marker="*", color='green')
     plt.scatter(dates, true_counts[:,2], label='w gt', marker="*", color='red')
     plt.xticks(np.arange(len(dates)), dates, rotation=90)
     plt.grid(axis='x', alpha=0.2)
     plt.legend(fontsize='small')
-    plt.savefig(save_path, bbox_inches='tight', pad_inches=0)
+    plt.ylabel('Count')
+    plt.savefig(save_path, bbox_inches='tight', pad_inches=0, transparent=True)
     plt.close()
 
 def plot_roc_curves(y_true, y_probs, labels, path):
     plt.rcdefaults()
-    plt.figure()
+    plt.figure(figsize=(6.4/2, 4.8/2))
 
-    for i, label in enumerate(labels):
+    for i, (label, color) in enumerate(zip(labels, ['orange', 'green', 'red'], strict=True)):
         # Compute ROC curve and ROC area
         fpr, tpr, _ = roc_curve(y_true[:, i], y_probs[:, i])
         roc_auc = auc(fpr, tpr)
 
         # Plot ROC curve
-        plt.plot(fpr, tpr, label=f'{label} (AUC={roc_auc:.2f})')
+        plt.plot(fpr[:-1], tpr[:-1], label=f'{label} (AUC={roc_auc:.2f})', color=color)
 
     plt.xlim([0.0, 1.0])
     plt.ylim([0.0, 1.05])
     plt.xlabel('False Positive Rate')
     plt.ylabel('True Positive Rate')
-    plt.plot([0, 1], [0, 1], color='navy', linestyle='--')
+    plt.plot([0, 1], [0, 1], color='navy', linestyle='--', linewidth=0.5)
     plt.legend(loc="lower right", fontsize='small')
-    plt.savefig(path, bbox_inches='tight', pad_inches=0)
+    plt.savefig(path, bbox_inches='tight', pad_inches=0, transparent=True)
     plt.close()
 
 def evaluate_results(all_preds, all_targets, class_labels, model_info, save_matrix_path, plot=True):
@@ -78,7 +85,7 @@ def evaluate_results(all_preds, all_targets, class_labels, model_info, save_matr
         plt.ylabel('True')
         # plt.title(f'Confusion Matrix for Label {class_labels[i]} - {output_string}\n{model_info}')
         try:
-            plt.savefig(os.path.join(save_matrix_path, f'{model_info}_cm_label_{class_labels[i]}.pdf'), bbox_inches='tight', pad_inches=0)
+            plt.savefig(os.path.join(save_matrix_path, f'{model_info}_cm_label_{class_labels[i]}.pdf'), bbox_inches='tight', pad_inches=0, transparent=True)
         except Exception as e:
             print(f'Error: Save confusion martrix{e}')
         plt.close()
@@ -111,14 +118,14 @@ def print_combined_multilabel_confusion_matrix(path, y_true, y_pred, labels_idx,
     plt.rcParams.update({'font.size': 14})
     plt.figure(figsize=(10, 8))
     ax = sns.heatmap(combined_cm, annot=True, fmt='d', cmap='Blues', 
-                        xticklabels=label_combinations, yticklabels=label_combinations, vmax=2500, vmin=0, cbar=False)
+                        xticklabels=label_combinations, yticklabels=label_combinations, vmax=2800, vmin=0, cbar=False)
     ax.tick_params(axis='both', which='major', labelsize=14)
     plt.xlabel('Predicted')
     plt.ylabel('True')
     if title is not None:
         plt.title(title)
     try:
-        plt.savefig(path, bbox_inches='tight', pad_inches=0)
+        plt.savefig(path, bbox_inches='tight', pad_inches=0, transparent=True)
     except Exception as e:
         print(f'Save confusion martrix{e}')
     plt.close()

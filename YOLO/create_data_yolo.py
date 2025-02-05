@@ -441,8 +441,10 @@ def extract_time_stamp(file_path:str):
         idx = file_path.find('_-')
         hour_str = file_path[idx+2:idx+4] # 20161117_0757_-08.167-08.500.wav => 08.167 = 8h 10min
         hour_str += str(int(float(file_path[idx+4:idx+7]) / 1000 * 60)).zfill(2) # add minutes
-    else:
+    elif file_path.split('/')[-1].split('_')[1][:6].isdigit():
         hour_str = file_path.split('/')[-1].split('_')[1][:6] # eg date_120000.wav => 120000 = 12h;
+    else:
+        raise ValueError(f"Could not extract time from file path: {file_path}. Format not supported.")
     assert hour_str.isdigit() and (len(hour_str) == 6 or len(hour_str) == 4), f"Hour string is not in the correct format: {hour_str}"
     hour = int(hour_str[:2])
     minute = int(hour_str[2:4])

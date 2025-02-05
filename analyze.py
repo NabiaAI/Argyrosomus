@@ -37,11 +37,11 @@ def _infer_cnn(audios, sample_rate):
     tuple: A tuple containing:
         - preds (list): The predicted labels or outputs from the CNN model.
         - outs (list): The raw outputs from the CNN model.
-        - None: Placeholder for additional return values (currently None).
+        - None: For compatability with _infer_yolo.
     """
     audios = [AudioSegment.from_ndarray(audio, sample_rate) for audio in audios]
     outs, preds = cnn_model.predict(audios,resume_model=args.resume_model)
-    return preds,outs,None
+    return preds,outs.reshape((-1, 1, 3)),None
 
 def _infer_yolo(audios, sample_rate):
     """
@@ -97,7 +97,7 @@ def _save_array_list(path, arrays: list[np.ndarray]):
     array_with_idx = np.vstack(arrays_with_idx, dtype=np.float32) if len(arrays_with_idx) > 0 else np.array([], dtype=np.float32)
     np.savez_compressed(path, boxes_with_segment_idx=array_with_idx)
 
-def infer(path: str, out_path=None, skip_existing=True, save_box_preds=False, extract_timestamps=True):
+def infer(path: str, out_path=None, skip_existing=True, save_box_preds=False, extract_timestamps=True, infer_model=_infer_yolo):
     """
     Perform inference on audio files and save the results.
 
@@ -113,6 +113,7 @@ def infer(path: str, out_path=None, skip_existing=True, save_box_preds=False, ex
     save_box_preds (bool, optional): If True, save box predictions, which are total vocalizations. Default is False.
     extract_timestamps (bool, optional): If True, extract timestamps from the audio files. 
                 If False, 0s since begin of the day is assumed. Default is True.
+    inf_model (function, optional): The inference function to use. Default is _infer_yolo.
     Returns: (preds, times) or (None, None) if inference is skipped.
     """
     if os.path.isfile(path):
@@ -145,7 +146,7 @@ def infer(path: str, out_path=None, skip_existing=True, save_box_preds=False, ex
 
     times, audios, sample_rate = segment_audios(paths)
 
-    preds, boxes, box_preds = _infer_model(audios, sample_rate)
+    preds, boxes, box_preds = infer_model(audios, sample_rate)
     _save_array_list(out_boxes, boxes)
     np.savez_compressed(out_times, times=times)
     np.savez_compressed(out_preds, preds=preds)
@@ -189,7 +190,7 @@ def _average_nan_partially_ignored(arr: np.ndarray, window_size):
             arr_smooth[i] = np.mean(valid_values)
     return arr_smooth
 
-def _smooth_and_plot(x, y, window_size, label, color, only_moving_average=False):
+def _smooth_and_plot(x, y, window_size, label, color, linestyle='-', only_moving_average=False):
     """
     Smooths and plots the input data using a moving average and optionally plots the smoothed data using spline interpolation.
     
@@ -199,6 +200,7 @@ def _smooth_and_plot(x, y, window_size, label, color, only_moving_average=False)
     window_size (int): The size of the window for computing the moving average.
     label (str): The label for the plot.
     color (str): The color of the plot line.
+    linestyle (str, optional): The line style of the plot. Default is '-'.
     only_moveing_average (bool, optional): If True, only the moving average is plotted.
                                            Otherwise a B-Spline interpolation is added. Defaults to False.
     """
@@ -207,7 +209,7 @@ def _smooth_and_plot(x, y, window_size, label, color, only_moving_average=False)
     x_smooth = _average_nan_partially_ignored(x, window_size)
 
     if only_moving_average:
-        plt.plot(x_smooth, y_smooth, color=color, label=label)
+        plt.plot(x_smooth, y_smooth, color=color, label=label, linestyle=linestyle)
         return
     
     # Downsample the data to reduce the number of knots
@@ -224,7 +226,7 @@ def _smooth_and_plot(x, y, window_size, label, color, only_moving_average=False)
     # Plot the smoothed line
     plt.plot(xnew, y_smooth_spline, color=color, label=label, alpha=0.3)
 
-def _plot_analysis(all_ratios, all_m_w_counts, n_boot, batch_number, path, file_ending='.pdf'):
+def _plot_analysis(all_ratios, all_m_w_counts, n_boot, batch_number, path, aggr_int=10, file_ending='.pdf'):
     """
     Plots analysis of counts with optional bootstrapping.
 
@@ -241,34 +243,39 @@ def _plot_analysis(all_ratios, all_m_w_counts, n_boot, batch_number, path, file_
     else: 
         chosen_idxes = np.random.choice(all_ratios.shape[0], min(20, n_boot) * batch_number)
     plt_ratios = all_ratios[chosen_idxes]
-    _, ax1 = plt.subplots(figsize=(10,8))
+    _, ax1 = plt.subplots(figsize=(15,9))
     #ax1.scatter(plt_ratios[:,0], plt_ratios[:,1], label='Ratios')
     #ax1.plot(plt_ratios[:,0], intercept + slope * plt_ratios[:,0], label='Trend Line', linestyle='--')
     ax1.set_xlabel('Time (h)'), #ax1.set_ylabel('Ratio (m/w)'), ax1.legend(loc='upper left')
     ax1.set_xticks(np.arange(0, 24, 2))
+    y_max = aggr_int * 60 // seg_dur_s
+    ax1.set_yticks(np.arange(0, y_max+1, y_max//5))
+
+    markers = ['o', 'x', '+'] # ['v', 'v', 'v'] ['o', 'o', 'o']
+    linestyle = '-' # ':'
 
     # scatter-plot counts
     #ax2 = ax1.twinx()
     ax2 = ax1 # REMOVE THIS TO PLOT BOTH
     plt_lt_m_w = all_m_w_counts[chosen_idxes]
-    ax2.scatter(plt_ratios[:,0], plt_lt_m_w[:,0], label='lt', marker="o", color='orange')
-    ax2.scatter(plt_ratios[:,0], plt_lt_m_w[:,1], label='m', marker="x", color='green')
-    ax2.scatter(plt_ratios[:,0], plt_lt_m_w[:,2], label='w', marker="+", color='red')
+    ax2.scatter(plt_ratios[:,0], plt_lt_m_w[:,0], label='lt', marker=markers[0], color='orange')
+    ax2.scatter(plt_ratios[:,0], plt_lt_m_w[:,1], label='m', marker=markers[1], color='green')
+    ax2.scatter(plt_ratios[:,0], plt_lt_m_w[:,2], label='w', marker=markers[2], color='red')
 
     # Plot smoothed lines 
-    window_size = 10  # Adjust the window size as needed
-    _smooth_and_plot(plt_ratios[:,0], plt_lt_m_w[:,0], window_size, None, 'orange', only_moving_average=True)
-    _smooth_and_plot(plt_ratios[:,0], plt_lt_m_w[:,1], window_size, None, 'green', only_moving_average=True)
-    _smooth_and_plot(plt_ratios[:,0], plt_lt_m_w[:,2], window_size, None, 'red', only_moving_average=True)
+    window_size = 3  # Adjust the window size as needed
+    _smooth_and_plot(plt_ratios[:,0], plt_lt_m_w[:,0], window_size, None, 'orange', linestyle=linestyle, only_moving_average=True)
+    _smooth_and_plot(plt_ratios[:,0], plt_lt_m_w[:,1], window_size, None, 'green', linestyle=linestyle, only_moving_average=True)
+    _smooth_and_plot(plt_ratios[:,0], plt_lt_m_w[:,2], window_size, None, 'red', linestyle=linestyle, only_moving_average=True)
 
-    ax2.set_ylabel('Counts'), ax2.legend(fontsize='small')
+    ax2.set_ylabel('Counts')#, ax2.legend(fontsize='small')
     plt.grid(axis='x', alpha=0.2)
 
     #plt.xticks(np.arange(batch_number), np.arange(batch_number) + 2015)
     #CI_str = f"(95%CI: [{slope_ci[0]:.3f}, {slope_ci[1]:.3f}])"if n_boot > 1 else ""
     #plt.text(0.03, 0.83, f'r: {r_value:.3f} (r²: {r_value**2:.3f}), slope {slope:.3f} {CI_str}', transform=plt.gca().transAxes, fontsize=12, verticalalignment='top')
     #plt.text(0.03, 0.79, trend_str, transform=plt.gca().transAxes, fontsize=12, verticalalignment='top')
-    plt.savefig(f'{path}_daily{file_ending}', bbox_inches='tight', pad_inches=0)
+    plt.savefig(f'{path}_daily{file_ending}', bbox_inches='tight', pad_inches=0, transparent=True)
     plt.close()
 
 def aggregate_over_time(preds:np.ndarray, times:np.ndarray, n_boot=1, aggregation_interval_minutes = 10, fill_missing_with_NaN=False, min_time=None, max_time=None, verbose=False):
@@ -333,7 +340,7 @@ def aggregate_over_time(preds:np.ndarray, times:np.ndarray, n_boot=1, aggregatio
 
         if n_boot == 1:
             lt_m_w_counts = batch.sum(axis=0, keepdims=True)
-            ratios = lt_m_w_counts[:, 1] / lt_m_w_counts[:, 2]
+            ratios = np.divide(lt_m_w_counts[:, 1], lt_m_w_counts[:, 2], out=np.zeros_like(lt_m_w_counts[:, 1], dtype='float'), where=lt_m_w_counts[:, 2] != 0)
         else:
             lt_m_w_counts, ratios = quant.bootstrap(preds=batch, which_ratio=[1,2], n=n_boot)
         all_times.append(mean_time)
@@ -404,7 +411,7 @@ def analyze_by_day(in_path: str, n_boot=1, aggregation_interval_minutes=10, star
     """
     print(f"Analyzing {in_path}")
     if in_path.lower().endswith('.wav'):
-        preds, times = infer(path=in_path, out_path=None, skip_existing=True, extract_timestamps=False)
+        preds, times = infer(path=in_path, out_path=None, skip_existing=True, extract_timestamps=False, infer_model=_infer_model)
         times = np.array(times) + start_time_s
         in_path = in_path[:-len('.wav')]
     else:
@@ -428,7 +435,7 @@ def analyze_by_day(in_path: str, n_boot=1, aggregation_interval_minutes=10, star
     all_ratios = np.vstack(all_ratios)
     all_lt_m_w_counts = np.vstack(all_lt_m_w_counts)
 
-    _plot_analysis(all_ratios, all_lt_m_w_counts, n_boot, batch_number, path=in_path, file_ending=file_ending)
+    _plot_analysis(all_ratios, all_lt_m_w_counts, n_boot, batch_number, path=in_path, file_ending=file_ending, aggr_int=aggregation_interval_minutes)
     return all_lt_m_w_counts
 
 def infer_all(in_path, out_path, skip_existing=True):
@@ -444,7 +451,7 @@ def infer_all(in_path, out_path, skip_existing=True):
         dirs = sorted(dirs)
         for d in tqdm(dirs):
             p = os.path.join(root, d)
-            infer(path=p, out_path=out_path, skip_existing=skip_existing)
+            infer(path=p, out_path=out_path, skip_existing=skip_existing, infer_model=_infer_model)
 
 def _get_true_counts(path_to_selection_table):
     """
@@ -483,12 +490,13 @@ def _get_true_counts(path_to_selection_table):
     labels = np.array(labels)
     return np.clip(labels, 0, 1).sum(axis=0), labels.sum(axis=0)
 
-def analyze_all_days_by_day(in_path):
+def analyze_all_days_by_day(in_path, aggregation_interval_minutes=10):
     """
     Analyzes data for all `n` days in the given input directory. Each day is analyzed by day.
 
     Parameters:
         in_path (str): The input directory path containing the day directories (format YYYYMMDD) to be analyzed.
+        aggregation_interval_minutes (int, optional): The time interval in minutes for aggregating the data. Default is 10.
 
     Returns:
         tuple: A tuple containing:
@@ -505,7 +513,7 @@ def analyze_all_days_by_day(in_path):
             if f.endswith('_preds.npz'):
                 f: str = f.replace('_preds.npz', '')
                 p = os.path.join(root, f)
-                counts = analyze_by_day(p)
+                counts = analyze_by_day(p, aggregation_interval_minutes=aggregation_interval_minutes)
                 dates.append(f)
                 sums.append(counts.sum(axis=0)/len(counts)) # average over time slots (negates the effect if a day has less data)
     sums = np.array(sums)
@@ -524,38 +532,46 @@ def plot_against_validation_data(validation_path, dest = f"data/validation_analy
     Raises:
     AssertionError: If the corresponding Raven selection table file for an audio file is not found.
     """
-    for f in sorted(os.listdir(validation_path)):
-        p = os.path.join(validation_path, f)
-        if f.endswith('.wav'):
-            infer(path=p, out_path=dest, skip_existing=skip_existing, save_box_preds=True)
-        if f.endswith('Table.1.selections.txt'):
-            shutil.copy(p, os.path.join(dest, f))
+    def _run_method(path_suffix, infer_model):
+        sub_dest = os.path.join(dest, path_suffix)
+        os.makedirs(sub_dest, exist_ok=True)
+        for f in sorted(os.listdir(validation_path)):
+            p = os.path.join(validation_path, f)
+            if f.endswith('.wav'):
+                infer(path=p, out_path=sub_dest, skip_existing=skip_existing, save_box_preds=True, infer_model=infer_model)
+            if f.endswith('Table.1.selections.txt'):
+                shutil.copy(p, os.path.join(sub_dest, f))
 
-    dates = []
-    sums = []
-    true_counts = []
-    true_counts_total = []
-    box_preds_sums = []
-    for f in sorted(os.listdir(dest)):
-        p = os.path.join(dest, f)
-        if f.endswith('_preds.npz'):
-            preds = np.load(p)['preds'] # shape (n, 3)
-            box_preds = np.load(f"{p[:p.index('_preds.npz')]}_boxpreds.npy")
-            sums.append(preds.sum(axis=0))
-            box_preds_sums.append(box_preds.sum(axis=0))
+        dates = []
+        sums = []
+        true_counts = []
+        true_counts_total = []
+        box_preds_sums = []
+        for f in sorted(os.listdir(sub_dest)):
+            p = os.path.join(sub_dest, f)
+            if f.endswith('_preds.npz'):
+                preds = np.load(p)['preds'] # shape (n, 3)
+                if os.path.exists(f"{p[:p.index('_preds.npz')]}_boxpreds.npy"):
+                    box_preds = np.load(f"{p[:p.index('_preds.npz')]}_boxpreds.npy", allow_pickle=True)
+                    box_preds_sums.append(box_preds.sum(axis=0))
+                sums.append(preds.sum(axis=0))
 
-            raven_file = f'{p[:p.index('_preds.npz')]}.Table.1.selections.txt'
-            assert os.path.exists(raven_file), f"Labels not found for {p}"
-            segment_counts, total_counts = _get_true_counts(raven_file)
-            true_counts.append(segment_counts), true_counts_total.append(total_counts)
-            dates.append(f)
+                raven_file = f'{p[:p.index('_preds.npz')]}.Table.1.selections.txt'
+                assert os.path.exists(raven_file), f"Labels not found for {p}"
+                segment_counts, total_counts = _get_true_counts(raven_file)
+                true_counts.append(segment_counts), true_counts_total.append(total_counts)
+                dates.append(f)
+        
+        sums, true_counts = np.array(sums), np.array(true_counts)
+        box_preds_sums, true_counts_total = np.array(box_preds_sums), np.array(true_counts_total)
+        dates = list(map(lambda x: f"{x[15:17]}h {x[6:8]}.{x[4:6]}.{x[2:4]}", dates))
+        return dates, sums, true_counts, box_preds_sums, true_counts_total
     
-    sums, true_counts = np.array(sums), np.array(true_counts)
-    box_preds_sums, true_counts_total = np.array(box_preds_sums), np.array(true_counts_total)
-    dates = list(map(lambda x: f"{x[15:17]}h-{x[6:8]}.{x[4:6]}.{x[2:4]}", dates))
+    dates, sums_yolo, true_counts, box_preds_sums, true_counts_total = _run_method("yolo", _infer_yolo)
+    _, sums_cnn, _, _, _ = _run_method("cnn", _infer_cnn)
 
-    eval.plot_validation_output(dates, sums, true_counts, save_path=f"{dest}/result_segment.pdf")
-    eval.plot_validation_output(dates, box_preds_sums, true_counts_total, save_path=f"{dest}/result_total_calls.pdf")
+    eval.plot_validation_output(dates, sums_yolo, sums_cnn, true_counts, save_path=f"{dest}/result_segment.pdf")
+    eval.plot_validation_output(dates, box_preds_sums, None, true_counts_total, save_path=f"{dest}/result_total_calls.pdf")
 
 
 def plot_over_time(in_path, use_cached=False, aggr_interval_min=10, only_every_nth_day=1, smoothing_window=1):
@@ -601,7 +617,7 @@ def plot_over_time(in_path, use_cached=False, aggr_interval_min=10, only_every_n
     plt.xticks(np.arange(0, len(dates), 365/12), minor=True)
    # plt.yscale('log')
     plt.legend()
-    plt.savefig(f'{in_path}/over_years.pdf', bbox_inches='tight', pad_inches=0)
+    plt.savefig(f'{in_path}/over_years.pdf', bbox_inches='tight', pad_inches=0, transparent=True)
     plt.close()
 
 def _get_epoch_time(date_str):
@@ -721,7 +737,7 @@ def print_dial_plot(in_path, aggregation_interval_minutes=10, shift_by_fraction_
         ax.set_yticklabels(wall_clock, fontsize=5)
 
         fig.colorbar(im, ax=ax, orientation='vertical', shrink=0.8)
-    plt.savefig(dest, bbox_inches='tight', pad_inches=0)
+    plt.savefig(dest, bbox_inches='tight', pad_inches=0, transparent=True)
                 
 
 def parse_args():
@@ -753,16 +769,17 @@ if __name__ == '__main__':
     #----------------------------------------------------------------------#
 
     # infer_all(in_path, out_path)
-    # infer(path=f"{in_path}/20210707", out_path=out_path,skip_existing=True)
+    # infer(path=f"{in_path}/20210707", out_path=out_path,skip_existing=True, infer_model=_infer_model)
 
     # analyze_by_day('YOLO/labeled_data/train/audio/Montijo_20210712_0.wav', 
     #                aggregation_interval_minutes=1, start_time_s=0, file_ending='.pdf')
 
-    # analyze_all_days_by_day('data/analyzed_subset')
+    # infer_all(in_path, 'data/analyzed_subset', skip_existing=True)
+    analyze_all_days_by_day('data/analyzed_subset', aggregation_interval_minutes=30)
 
     # compute_count_over_years(out_path, "data")
     # print_dial_plot("data")
 
-    plot_against_validation_data('YOLO/labeled_data/validation/audio', skip_existing=False)
+    # plot_against_validation_data('YOLO/labeled_data/validation/audio', skip_existing=True)
 
     # plot_over_time("data", use_cached=True, only_every_nth_day=7, smoothing_window=40)
