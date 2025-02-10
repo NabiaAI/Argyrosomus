@@ -14,7 +14,7 @@ def plot_validation_output(dates, sums1, sums2, true_counts, save_path):
     plt.figure(figsize=(12,4))
     plt.rcParams.update({'font.size': 14})
     true_counts = true_counts - 0.5 # to make the plot more readable
-    for sums, line_sytle, marker, label in zip([sums1, sums2], [':', '--'], ['v', 'o'], ['YOLO', 'CNN']):
+    for sums, line_sytle, marker, label in zip([sums1, sums2], [':', '--'], ['v', 'o'], ['ObjDet', 'SegClas']):
         if sums is None:
             continue
 
@@ -22,13 +22,13 @@ def plot_validation_output(dates, sums1, sums2, true_counts, save_path):
             for d, yone, ytwo in zip(dates, sums[:,num], true_counts[:,num]):
                 plt.plot([d, d], [yone, ytwo], marker="", color=color, linestyle=line_sytle, linewidth=1)
 
-        plt.scatter(dates, sums[:,0], label=f'lt {label}', marker=marker,  color='orange')
-        plt.scatter(dates, sums[:,1], label=f'm {label}', marker=marker, color='green')
-        plt.scatter(dates, sums[:,2], label=f'w {label}', marker=marker, color='red')
+        plt.scatter(dates, sums[:,0], label=f'lt {label}', marker=marker, facecolors='none', edgecolors='orange')
+        plt.scatter(dates, sums[:,1], label=f'm {label}', marker=marker, facecolors='none', edgecolors='green')
+        plt.scatter(dates, sums[:,2], label=f'w {label}', marker=marker, facecolors='none', edgecolors='red')
 
-    plt.scatter(dates, true_counts[:,0], label='lt gt', marker="*",  color='orange')
-    plt.scatter(dates, true_counts[:,1], label='m gt', marker="*", color='green')
-    plt.scatter(dates, true_counts[:,2], label='w gt', marker="*", color='red')
+    plt.scatter(dates, true_counts[:,0], label='lt gt', marker="*",  facecolors='none', edgecolors='orange')
+    plt.scatter(dates, true_counts[:,1], label='m gt', marker="*", facecolors='none', edgecolors='green')
+    plt.scatter(dates, true_counts[:,2], label='w gt', marker="*", facecolors='none', edgecolors='red')
     plt.xticks(np.arange(len(dates)), dates, rotation=90)
     plt.grid(axis='x', alpha=0.2)
     plt.legend(fontsize='small')
@@ -116,12 +116,12 @@ def print_combined_multilabel_confusion_matrix(path, y_true, y_pred, labels_idx,
 
     plt.rcdefaults()
     plt.rcParams.update({'font.size': 14})
-    plt.figure(figsize=(10, 8))
+    plt.figure(figsize=(7.5, 6))
     ax = sns.heatmap(combined_cm, annot=True, fmt='d', cmap='Blues', 
                         xticklabels=label_combinations, yticklabels=label_combinations, vmax=2800, vmin=0, cbar=False)
     ax.tick_params(axis='both', which='major', labelsize=14)
-    plt.xlabel('Predicted')
-    plt.ylabel('True')
+    plt.xlabel('Predicted', fontsize=18)
+    plt.ylabel('True', fontsize=18)
     if title is not None:
         plt.title(title)
     try:
