@@ -1007,7 +1007,7 @@ class MAClsTrainer(object):
                 self.__save_checkpoint(save_model_path=save_model_path, epoch_id=epoch_id, best_acc=self.eval_acc)
 
 
-    def predict(self, data_or_path, resume_model=None):
+    def predict(self, data_or_path, resume_model=None, return_feature_maps=False):
         if self.test_loader is None:
             self.__setup_dataloader()
         if self.model is None:
@@ -1041,23 +1041,28 @@ class MAClsTrainer(object):
         
         all_preds = []
         all_outputs = []
+        feature_maps = []
         with torch.no_grad():
             for batch_id, (features, _, _) in enumerate(tqdm(loader)):
                 if self.stop_eval: break
                 features = features.to(self.device)
 
                 assert not self.model.training, "Model is in training mode during forward inference."
-                output, _ = eval_model(features)
+                output, _, fm = eval_model.forward(features, return_feature_maps=True)
                 
                 thresholds = self.optimal_thresholds 
                 preds = self.apply_optimal_thresholds(output,thresholds)
                 
                 all_outputs.append(output.cpu().numpy())
                 all_preds.append(preds.cpu().numpy())
+                feature_maps.append(fm.cpu().numpy())
 
         all_outputs = np.vstack(all_outputs)
         all_preds = np.vstack(all_preds)
+        feature_maps = np.vstack(feature_maps)
 
+        if return_feature_maps:
+            return all_outputs, all_preds, feature_maps
         return all_outputs, all_preds
 
 

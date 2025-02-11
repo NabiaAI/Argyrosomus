@@ -40,8 +40,8 @@ def _infer_cnn(audios, sample_rate):
         - None: For compatability with _infer_yolo.
     """
     audios = [AudioSegment.from_ndarray(audio, sample_rate) for audio in audios]
-    outs, preds = cnn_model.predict(audios,resume_model=args.resume_model)
-    return preds,outs.reshape((-1, 1, 3)),None
+    outs, preds, feature_maps = cnn_model.predict(audios,resume_model=args.resume_model, return_feature_maps=True)
+    return preds,outs.reshape((-1, 1, 3)),feature_maps
 
 def _infer_yolo(audios, sample_rate):
     """

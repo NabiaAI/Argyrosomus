@@ -106,7 +106,7 @@ class ResNet18LSTM(nn.Module):
         self.fc = nn.Linear(lstm_hidden_size * 2, num_class)
         self.sigmoid = nn.Sigmoid()
 
-    def forward(self, x):
+    def forward(self, x, return_feature_maps=False):
         #print(f"Input tensor shape before reshape: {x.shape}")
         
         # 如果输入形状是 [B, T, F]，调整为 [B, 1, F, T]
@@ -128,6 +128,9 @@ class ResNet18LSTM(nn.Module):
 
         # LSTM 前向传播
         x, _ = self.lstm(x)
+        feature_maps = x[:, -1, :]
         x = self.fc(x[:, -1, :])  # 取最后一个时间步
         x = self.sigmoid(x)
+        if return_feature_maps:
+            return x, freq_band_activations, feature_maps
         return x,freq_band_activations
