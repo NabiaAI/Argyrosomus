@@ -3,14 +3,18 @@ import os
 sys.path.append(".")
 import analyze
 from YOLO.infer_yolo import segment_audios
+from YOLO.create_data_yolo import save_spectrogram
 import umap
 import matplotlib.pyplot as plt
 import hdbscan
 import numpy as np
 import glob
 import librosa
+import functools
 import torch
+from sklearn.cluster import KMeans
 from tqdm import tqdm
+
 np.random.seed(0)
 torch.manual_seed(0)
 
@@ -19,6 +23,7 @@ device = 'mps'
 
 def cache_results(cache_dir):
     def decorator(func):
+        @functools.wraps(func)
         def wrapper(*args, **kwargs):
             os.makedirs(cache_dir, exist_ok=True)
             
@@ -61,25 +66,131 @@ def _infer_cnn(paths):
     _, _, feature_maps = analyze._infer_cnn(audios, sample_rate,)
     return feature_maps
 
+
+@cache_results(base_cache_dir)
+def _infer_autoencoder(paths, batch_size=256, sr=4000):
+    from autoencoder import load_model, extract_mel_spectrogram, pad_too_short
+    model = load_model("clustering/models/autoencoder_best.pth").eval().to(device)
+    expected_width = model.expected_shape[-1]
+
+    all_embeddings = []
+    for i in tqdm(range(0, len(paths), batch_size)):
+        batch_paths = paths[i:i + batch_size]
+
+        audio = [librosa.core.load(path, sr=sr, mono=True)[0] for path in batch_paths]
+        mel_spectrograms = [extract_mel_spectrogram(a, sr=sr) for a in audio]
+        mel_spectrograms = np.array([pad_too_short(m, expected_width) for m in mel_spectrograms])
+        mel_spectrograms = torch.tensor(mel_spectrograms).float().unsqueeze(1).to(device) # add channel dimension
+
+        with torch.no_grad():
+            embeddings: torch.tensor = model.encoder(mel_spectrograms)
+
+        all_embeddings.append(embeddings.cpu().numpy()) 
+
+    all_embeddings = np.vstack(all_embeddings)
+    return all_embeddings
+
+def save_spectrograms_to_clusters(paths, clusters, base_dest, sr=4000):
+    """
+    Reads .wav files and saves their spectrograms to folders based on their cluster labels.
+
+    Parameters:
+    paths (list of str): List of paths to .wav files.
+    clusters (np.ndarray): Array of cluster labels for each file.
+    base_path (str): Base path where all cluster folders are stored.
+    sr (int, optional): Sample rate for reading audio files. Default is 4000.
+    """
+    for path, cluster in tqdm(zip(paths, clusters), total=len(paths), desc="Spectrograms"):
+        cluster_dir = os.path.join(base_dest, str(cluster))
+        os.makedirs(cluster_dir, exist_ok=True)
+
+        audio, sr = librosa.load(path, sr=sr)
+        save_spectrogram(audio, sr, file_name=os.path.basename(path), image_folder=cluster_dir, frequency_limit_Hz=sr//2)
+
+def cluster_with_configuration(paths, feature_extractor, step_0_clust=None, step_1_proj=None, step_2_clust=None, base_dest=None, plot=True, fraction=1.0):
+    embeddings = feature_extractor(paths)
+    assert fraction > 0.0 and fraction <= 1.0
+    if fraction < 1.0:
+        idx = np.random.choice(len(embeddings), int(fraction * len(embeddings)), replace=False)
+        idx.sort()
+        embeddings = embeddings[idx]
+        paths = [paths[i] for i in idx]
+
+    print("Embeddings shape:", embeddings.shape)
+
+    if step_0_clust:
+        clusters = step_0_clust(embeddings)
+    if step_1_proj:
+        embeddings = step_1_proj(embeddings)
+    if step_2_clust:
+        clusters = step_2_clust(embeddings)
+
+    print("Number of clusters:", len(set(clusters)))
+
+    functions = [feature_extractor, step_0_clust, step_1_proj, step_2_clust]
+    if not base_dest:
+        base_dest = os.path.join("data/clustering", *[f.__name__ for f in functions if f])
+    
+    print("Saving results to", base_dest)
+    save_spectrograms_to_clusters(paths, clusters, base_dest)
+
+    if not plot: 
+        return
+    
+    clusters = np.array(clusters)
+    noise_points = clusters == -1
+    if embeddings.shape[1] == 2:
+        plt.figure(figsize=(15, 3.75))
+        plt.scatter(embeddings[noise_points, 0], embeddings[noise_points, 1], c='red', marker='x', label='Noise')
+        plt.scatter(embeddings[~noise_points, 0], embeddings[~noise_points, 1], c=clusters[~noise_points], cmap="viridis", alpha=0.5)
+        plt.title("Projection (2D)")
+    elif embeddings.shape[1] == 3:
+        fig = plt.figure(figsize=(15, 3.75))
+        ax = fig.add_subplot(111, projection='3d')
+        ax.scatter(embeddings[noise_points, 0], embeddings[noise_points, 1], embeddings[noise_points, 2], c='red', marker='x', label='Noise')
+        ax.scatter(embeddings[~noise_points, 0], embeddings[~noise_points, 1], embeddings[~noise_points, 2], c=clusters[~noise_points], cmap="viridis", alpha=0.5)
+        ax.set_title("Projection (3D)")
+    else:
+        print("Cannot plot embeddings with more than 3 dimensions")
+    plt.show()
+
+def umap_3d(x):
+    return umap.UMAP(n_components=3, random_state=42).fit_transform(x)
+
+def hdb(x):
+    return hdbscan.HDBSCAN(min_cluster_size=15).fit_predict(x)
+
+def k_means(x):
+    return KMeans(n_clusters=7, random_state=0).fit_predict(x) # boat, silence, toadfish, meagre, weakfish, chorus, noise = 7 clusters?
+
+def k_nn_clustering(x):
+    idx = -3
+    audio, sr = librosa.load(paths[idx], sr=4000)
+    reference_spectro = save_spectrogram(audio, sr, as_array=True)
+    plt.imshow(reference_spectro)
+    plt.show()
+
+    reference_vector = x[idx]
+    distances = np.linalg.norm(x - reference_vector, axis=1)
+    sorted_idx = np.argsort(distances)
+    rank_positions = np.argsort(sorted_idx)
+
+    clusters = rank_positions // 200 # 200 elements in each cluster
+    return clusters
+
 if __name__ == '__main__':
     paths = glob.glob("YOLO/data/validation/audio_segments/*.wav")
 
-    feature_maps = _infer_cnn(paths)   
-    print(feature_maps.shape)
+    # cluster_with_configuration(paths, _infer_autoencoder, step_0_clust=k_nn_clustering, plot=False)
+    # cluster_with_configuration(paths, _infer_cnn, step_0_clust=k_nn_clustering, plot=False)
+    cluster_with_configuration(paths, _infer_cnn, step_0_clust=k_means, plot=False, fraction=0.1)
+    exit()
 
-    feature_maps = _infer_panns(paths)
-    print(feature_maps.shape)
+    cluster_with_configuration(paths, _infer_autoencoder, step_1_proj=umap_3d, step_2_clust=hdb, plot=False)
+    cluster_with_configuration(paths, _infer_autoencoder, step_0_clust=hdb, step_1_proj=umap_3d, plot=False)
 
-    umap_2d = umap.UMAP(n_components=2, random_state=42)
-    embedding_2d = umap_2d.fit_transform(feature_maps)
+    cluster_with_configuration(paths, _infer_cnn, step_1_proj=umap_3d, step_2_clust=hdb, plot=False)
+    cluster_with_configuration(paths, _infer_cnn, step_1_proj=umap_3d, step_2_clust=k_means, plot=False)
+    cluster_with_configuration(paths, _infer_cnn, step_0_clust=k_means, plot=False)
 
-    hdbscan_cluster = hdbscan.HDBSCAN(min_cluster_size=15)  # Adjust as needed
-    clusters_hdb = hdbscan_cluster.fit_predict(embedding_2d)
-
-    # Plot 2D UMAP visualization
-    plt.figure(figsize=(15, 3.75))
-    plt.scatter(embedding_2d[:, 0], embedding_2d[:, 1], c=clusters_hdb, cmap="viridis", alpha=0.7)
-    plt.title("UMAP Projection (2D)")
-    plt.xlabel("UMAP Dimension 1")
-    plt.ylabel("UMAP Dimension 2")
-    plt.show()
+    cluster_with_configuration(paths, _infer_panns, step_1_proj=umap_3d, step_2_clust=hdb, plot=False)

@@ -9,7 +9,6 @@ import copy
 import os
 from torch.utils.data import Dataset, DataLoader, random_split
 import glob
-import math
 from tqdm import tqdm
 from torchinfo import summary
 import audiomentations as AA
@@ -73,6 +72,11 @@ class MelSpectrogramAutoencoder(nn.Module):
         x_recon = self.decoder(z)
         return x_recon, z  # Return both the reconstructed spectrogram and latent representation
 
+def pad_too_short(spectrogram, expected_width):
+    if spectrogram.shape[-1] < expected_width: # pad too short audios
+        padding = expected_width - spectrogram.shape[-1]
+        spectrogram = np.pad(spectrogram, ((0, 0), (0, padding)), mode='constant', constant_values=0)
+    return spectrogram
 
 class AudioDataset(Dataset):
     def __init__(self, audio_dir, expected_width, sr=4000, n_mels=64, n_fft=256, hop_length=64, should_augment=False):
@@ -106,13 +110,11 @@ class AudioDataset(Dataset):
         mel_spectrogram = extract_mel_spectrogram(audio, sr=sr, 
                                                   n_mels=self.n_mels, hop_length=self.hop_length, n_fft=self.n_fft)
         
-        if mel_spectrogram.shape[-1] < self.expected_width: # pad too short audios
-            padding = self.expected_width - mel_spectrogram.shape[-1]
-            mel_spectrogram = np.pad(mel_spectrogram, ((0, 0), (0, padding)), mode='constant', constant_values=0)
+        mel_spectrogram = pad_too_short(mel_spectrogram, self.expected_width)
         
         mel_spectrogram = torch.tensor(mel_spectrogram).unsqueeze(0).float()  # Add channel dimension
         return mel_spectrogram  # Shape: (1, 64, 128)
-    
+
 def save_model(model: MelSpectrogramAutoencoder, path, epoch=-1, val_loss=-1):
     model_params = {
         "expected_shape": model.expected_shape,
@@ -207,9 +209,30 @@ def train(audio_directory, model, device='mps',  num_epochs=100, batch_size=32, 
             break
 
 if __name__ == '__main__':
-    model = MelSpectrogramAutoencoder(expected_shape=(1, 64, 192), latent_dim=64) # 1 Channel, 64 mel bins, 192 time bins (3 s audio at 4000 Hz (rounded to next multiple of 8))
-    batch_size=32
-    in_size = (batch_size,) + model.expected_shape
-    summary(model, input_size=in_size)
-    train("YOLO/data/train/audio_segments", model, device='mps', num_epochs=150, num_workers=0,
-          batch_size=batch_size , lr=0.001, patience=10, output_dir="clustering/models", augment=True)
+    # model = MelSpectrogramAutoencoder(expected_shape=(1, 64, 192), latent_dim=64) # 1 Channel, 64 mel bins, 192 time bins (3 s audio at 4000 Hz (rounded to next multiple of 8))
+    # batch_size=32
+    # in_size = (batch_size,) + model.expected_shape
+    # summary(model, input_size=in_size)
+    # train("YOLO/data/train/audio_segments", model, device='mps', num_epochs=150, num_workers=0,
+    #       batch_size=batch_size , lr=0.001, patience=10, output_dir="clustering/models", augment=True)
+
+
+    # infer example:
+    model = load_model("clustering/models/autoencoder_best.pth").eval()
+    example_wav = "YOLO/data/validation/audio_segments/20210706_2027_-21.000-21.167_segment_135.wav"
+    audio, sr = librosa.load(example_wav, sr=4000)
+    mel_spectrogram = extract_mel_spectrogram(audio, sr=sr,)
+    mel_spectrogram = torch.tensor(mel_spectrogram).unsqueeze(0).unsqueeze(0).float()  # Add channel and batch dimension
+    with torch.no_grad():
+        recon, _ = model(mel_spectrogram)
+    recon = recon.squeeze().detach().cpu().numpy()
+    print(recon.shape)
+
+    # Plot original and reconstructed spectrogram
+    import matplotlib.pyplot as plt
+    fig, axs = plt.subplots(2, 1, figsize=(12, 8))
+    librosa.display.specshow(mel_spectrogram.squeeze().cpu().numpy(), sr=sr, hop_length=64, x_axis='time', y_axis='mel', ax=axs[0])
+    axs[0].set_title("Original Mel Spectrogram")
+    librosa.display.specshow(recon, sr=sr, hop_length=64, x_axis='time', y_axis='mel', ax=axs[1])
+    axs[1].set_title("Reconstructed Mel Spectrogram")
+    plt.show()
