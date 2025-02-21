@@ -47,12 +47,13 @@ def normalize_audio(audio_data):
 
 def append_audios(audio_folder, save=False, normalize=False):
     """
-    Append all .wav audio files in a specified folder into a single audio file.
+    Append all .wav audio files in a specified folder or speficied list into a single audio file.
     The order of the audio files is determined by their alphanumeric order.
 
     Parameters:
-    audio_folder (str): The path to the folder containing the .wav files.
-    save (bool): If True, save the appended audio data to a new file named 'appended.wav' in the audio folder. Default is False.
+    audio_folder (str/list): The path to the folder containing the .wav files or a list of .wav file paths.
+    save (bool): If True, save the appended audio data to a new file named 'appended.wav' 
+                 in the audio folder or working directory in case of aprovided lsit. Default is False.
     normalize (bool): If True, normalize the appended audio data. Default is False.
     
     Returns:
@@ -61,14 +62,17 @@ def append_audios(audio_folder, save=False, normalize=False):
     Raises:
     AssertionError: If there is a sample rate mismatch between the .wav files.
     """
-    # Join all wav files in the audio foldeer, save as appended.wav
-    # The file order should be alphabetical
-    path = os.path.join(audio_folder, "appended.wav")
+    # Get a list of all.wav files in the audio folder
+    if isinstance(audio_folder, list):
+        assert len(audio_folder) > 0, "List of audio files is empty."
+        wav_files = audio_folder
+        path = os.path.join('.', "appended.wav")
+    else: 
+        wav_files = glob.glob(os.path.join(audio_folder, "*.wav"))
+        path = os.path.join(audio_folder, "appended.wav")
+
     if os.path.exists(path):
         os.remove(path)
-
-    # Get a list of all.wav files in the audio folder
-    wav_files = glob.glob(os.path.join(audio_folder, "*.wav"))
 
     # Sort the list of.wav files alphabetically
     wav_files.sort()
@@ -545,7 +549,7 @@ def create_spectrograms(audio_folder, image_folder, labels_folder, segment_folde
 
         # Calculate segment size in samples
         segment_samples = segment_duration * sample_rate
-        stride_samples = stride * sample_rate
+        stride_samples = int(stride * sample_rate)
 
         # Iterate over segments, save spectrograms, and add bounding boxes
         for i in tqdm(range(0, len(audio_data) - segment_samples + 1, stride_samples)):
@@ -575,6 +579,10 @@ def create_long_term_spectrogram(base_path, day):
 
 if __name__ == '__main__':
     # --- EXAMPLE USAGE ---
+    # convert single file to spectrogram
+    # file = "20170419_1553_-16.000-16.167_95.wav"
+    # audio, sr = librosa.load(file)
+    # save_spectrogram(audio, sr, file_name=os.path.basename(file), image_folder=os.path.dirname(file))
 
     # create long-term spectrogram
     # create_long_term_spectrogram("../convert_to_wav/wav/", "20210427")

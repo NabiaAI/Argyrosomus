@@ -111,8 +111,18 @@ def print_combined_multilabel_confusion_matrix(path, y_true, y_pred, labels_idx,
             if digit == '1':
                 new_label.append(labels[digit_idx])
         if len(new_label) == 0:
-            new_label = ['-']
+            new_label = ['no-fish']
         label_combinations[i] = ','.join(new_label)
+
+    # calculate percentage of TP per row 
+    true_percentages = []
+    for i in range(len(combined_cm)):
+        tp = combined_cm[i, i]
+        total = combined_cm[i].sum()
+        true_percentages.append(f"{tp/total*100:.1f}")
+    print('True positive percentages:')
+    [print(p) for p in true_percentages]
+    print()
 
     plt.rcdefaults()
     plt.rcParams.update({'font.size': 14})
@@ -120,8 +130,8 @@ def print_combined_multilabel_confusion_matrix(path, y_true, y_pred, labels_idx,
     ax = sns.heatmap(combined_cm, annot=True, fmt='d', cmap='Blues', 
                         xticklabels=label_combinations, yticklabels=label_combinations, vmax=2800, vmin=0, cbar=False)
     ax.tick_params(axis='both', which='major', labelsize=14)
-    plt.xlabel('Predicted', fontsize=18)
-    plt.ylabel('True', fontsize=18)
+    plt.xlabel('Predicted', fontsize=20)
+    plt.ylabel('True', fontsize=20)
     if title is not None:
         plt.title(title)
     try:

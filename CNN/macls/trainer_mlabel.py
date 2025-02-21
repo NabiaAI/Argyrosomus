@@ -1021,7 +1021,7 @@ class MAClsTrainer(object):
             self.model.load_state_dict(model_state_dict)
             logger.info(f'成功加载模型：{resume_model}')
 
-        self.model.eval()
+        self.model = self.model.eval()
         eval_model = self.model.module if isinstance(self.model, torch.nn.parallel.DistributedDataParallel) else self.model
 
         ds = MAClsDataset(data_list_path=data_or_path,

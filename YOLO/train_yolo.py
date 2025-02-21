@@ -11,7 +11,7 @@ if __name__ == '__main__':
     train_path = "runs/detect/train"
     if os.path.exists(train_path):
         print(f"Skipping training as model already exists. Please delete {train_path} to train anew.")
-        exit()
+        # exit()
 
     augmentations = {
         #"shear":20,
@@ -23,14 +23,14 @@ if __name__ == '__main__':
         "mixup":0.2,
     }
     device = 'mps'
-    imgsz=(64,320) # based on 1000Hz and 5s audio. MUST FIT WITH duration of audios must be multiple of 32
+    imgsz=(64,192) # based on 1000Hz and 3s audio. MUST FIT WITH duration of audios must be multiple of 32
 
-    model = YOLO(pretrained)
-    model.train(data='data.yaml', epochs=100, patience=20, device=device, plots=True, imgsz=imgsz, **augmentations) # cache='disk' (default False)
+    # model = YOLO(pretrained)
+    # model.train(data='data.yaml', epochs=100, patience=20, device=device, plots=True, imgsz=imgsz, **augmentations) # cache='disk' (default False)
 
     # # Resume training
-    # model = YOLO(f"{train_path}/weights/last.pt")  # load a partially trained model
-    # results = model.train(resume=True)
+    model = YOLO(f"{train_path}/weights/last.pt")  # load a partially trained model
+    results = model.train(resume=True)
 
     print("Calculating optimal classification thresholds for best model...")
     model = YOLOMultiLabelClassifier(f"{train_path}/weights", device=device, thresholds=threshold_val_path)

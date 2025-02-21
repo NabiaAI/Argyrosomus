@@ -187,7 +187,7 @@ def filter_too_short(audios, labels, srs, min_duration=0.1):
         return filtered_audios, None, filtered_srs
     return filtered_audios, filtered_labels, filtered_srs
 
-def numpy_audio_to_spectrogram(audio, sr, target_duration=5):
+def numpy_audio_to_spectrogram(audio, sr, target_duration=seg_dur_s):
     """
     Converts a numpy array of audio data with sample rate `sr` into a spectrogram.
 
@@ -204,7 +204,6 @@ def numpy_audio_to_spectrogram(audio, sr, target_duration=5):
     - If the length of the audio is greater than the target duration, it will be cropped.
     - A warning will be printed if the audio is longer than the target duration.
     """
-    target_duration=5 # TODO: remove this when model was trained again on 3s
     if len(audio) < target_duration * sr:
         length = int(target_duration * sr)
         audio = np.pad(audio, (0, length - len(audio)), 'constant')
@@ -411,7 +410,7 @@ class YOLOMultiLabelClassifier:
             self._model = model_path
         self.bounding_box_threshold = bounding_box_threshold
         self.device = device
-        self.imgsz = (64,320) # based on 4khz audio with 5s duration up to 1000 Hz. Must be multiple of 32
+        self.imgsz = (64,192) # based on 4khz audio with 3s duration up to 1000 Hz. Must be multiple of 32
         self.iou=0.5
         self.label_indices = {'lt':0, 'm':1, 'w':2}
         self.threshold_meagre_hz = 100
@@ -597,5 +596,5 @@ if __name__ == '__main__':
     #     if f.endswith(".wav"):
     #         input_file = os.path.join(base, f)
     #         _, _, boxes = model.predict_file(input_file, save=False, raven_table=True, threshold_boxes=True)
-    input_file = "convert_to_wav/wav/20160508/0301_.wav"
+    input_file = "/Users/I538904/gitrepos/Argyrosomus/convert_to_wav/wav/20210416/1429_.wav"
     _, _, boxes = model.predict_file(input_file, save=False, raven_table=True, threshold_boxes=True)
