@@ -14,6 +14,7 @@ import functools
 import torch
 from sklearn.cluster import KMeans
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 
 np.random.seed(0)
 torch.manual_seed(0)
@@ -80,17 +81,30 @@ def _infer_autoencoder(paths, batch_size=256, sr=4000):
         audio = [librosa.core.load(path, sr=sr, mono=True)[0] for path in batch_paths]
         mel_spectrograms = [extract_mel_spectrogram(a, sr=sr) for a in audio]
         mel_spectrograms = np.array([pad_too_short(m, expected_width) for m in mel_spectrograms])
-        mel_spectrograms = torch.tensor(mel_spectrograms).float().unsqueeze(1).to(device) # add channel dimension
+        
+        # normalize mel spectrograms
+        mel_spectrograms_norm = (mel_spectrograms - mel_spectrograms.min()) / (mel_spectrograms.max() - mel_spectrograms.min())
+        # print("median, average, 75 percentile", np.median(mel_spectrograms_norm), np.mean(mel_spectrograms_norm), np.percentile(mel_spectrograms_norm, 75))
+        # # distribution of values
+        # plt.figure(figsize=(3,3))
+        # plt.hist(mel_spectrograms.flatten(), bins=20)
+        # plt.show()
+
+        threshold = 0.6
+        mel_spectrograms_norm[mel_spectrograms_norm < threshold] = 0
+        # plt.imshow(mel_spectrograms_norm[0])
+        # plt.show()
+        mel_spectrograms_norm = torch.tensor(mel_spectrograms_norm).float().unsqueeze(1).to(device) # add channel dimension
 
         with torch.no_grad():
-            embeddings: torch.tensor = model.encoder(mel_spectrograms)
+            embeddings: torch.tensor = model.encoder(mel_spectrograms_norm)
 
         all_embeddings.append(embeddings.cpu().numpy()) 
 
     all_embeddings = np.vstack(all_embeddings)
     return all_embeddings
 
-def save_spectrograms_to_clusters(paths, clusters, base_dest, sr=4000):
+def save_spectrograms_to_clusters(paths, clusters, base_dest, embeddings, sr=4000):
     """
     Reads .wav files and saves their spectrograms to folders based on their cluster labels.
 
@@ -100,12 +114,31 @@ def save_spectrograms_to_clusters(paths, clusters, base_dest, sr=4000):
     base_path (str): Base path where all cluster folders are stored.
     sr (int, optional): Sample rate for reading audio files. Default is 4000.
     """
-    for path, cluster in tqdm(zip(paths, clusters), total=len(paths), desc="Spectrograms"):
+    # normalize embeddings
+    embeddings = (embeddings - embeddings.min(axis=0)) / (embeddings.max(axis=0) - embeddings.min(axis=0))
+
+    for path, cluster, embedding in tqdm(zip(paths, clusters, embeddings), total=len(paths), desc="Spectrograms"):
         cluster_dir = os.path.join(base_dest, str(cluster))
         os.makedirs(cluster_dir, exist_ok=True)
 
         audio, sr = librosa.load(path, sr=sr)
-        save_spectrogram(audio, sr, file_name=os.path.basename(path), image_folder=cluster_dir, frequency_limit_Hz=sr//2)
+        save_spectrogram(audio, sr, file_name=os.path.basename(path) + "real", image_folder=cluster_dir, frequency_limit_Hz=sr//4)
+
+        # save normalized thresholded mel spectrograms
+        from autoencoder import extract_mel_spectrogram
+        mel_spectrograms = extract_mel_spectrogram(audio, sr=sr)
+        mel_spectrograms_norm = (mel_spectrograms - (-80)) / (1.91e-6 - (-80))
+        threshold = 0.6
+        mel_spectrograms_norm[mel_spectrograms_norm < threshold] = 0
+        mel_spectrograms_norm=mel_spectrograms_norm[::-1] # fix for photo
+        plt.imsave(os.path.join(cluster_dir, f"{os.path.splitext(os.path.basename(path))[0]}.png"), mel_spectrograms_norm, cmap='viridis')
+
+        # save embeddings
+        # plt.imshow(embedding.reshape(1, -1), aspect='auto', cmap='viridis')
+        # plt.colorbar()
+        # plt.savefig(os.path.join(cluster_dir, f"{os.path.splitext(os.path.basename(path))[0]}_embedding.png"))
+        # plt.close()
+
 
 def cluster_with_configuration(paths, feature_extractor, step_0_clust=None, step_1_proj=None, step_2_clust=None, base_dest=None, plot=True, fraction=1.0):
     embeddings = feature_extractor(paths)
@@ -132,7 +165,7 @@ def cluster_with_configuration(paths, feature_extractor, step_0_clust=None, step
         base_dest = os.path.join("data/clustering", *[f.__name__ for f in functions if f])
     
     print("Saving results to", base_dest)
-    save_spectrograms_to_clusters(paths, clusters, base_dest)
+    save_spectrograms_to_clusters(paths, clusters, base_dest, embeddings)
 
     if not plot: 
         return
@@ -161,7 +194,7 @@ def hdb(x):
     return hdbscan.HDBSCAN(min_cluster_size=15).fit_predict(x)
 
 def k_means(x):
-    return KMeans(n_clusters=7, random_state=0).fit_predict(x) # boat, silence, toadfish, meagre, weakfish, chorus, noise = 7 clusters?
+    return KMeans(n_clusters=10, random_state=0).fit_predict(x) # boat, silence, toadfish, meagre, weakfish, chorus, noise = 7 clusters?
 
 def k_nn_clustering(x):
     idx = -3
@@ -180,17 +213,21 @@ def k_nn_clustering(x):
 
 if __name__ == '__main__':
     paths = glob.glob("YOLO/data/validation/audio_segments/*.wav")
+    fraction = 0.07
 
-    # cluster_with_configuration(paths, _infer_autoencoder, step_0_clust=k_nn_clustering, plot=False)
-    # cluster_with_configuration(paths, _infer_cnn, step_0_clust=k_nn_clustering, plot=False)
-    cluster_with_configuration(paths, _infer_cnn, step_0_clust=k_means, plot=False, fraction=0.1)
-    exit()
+    cluster_with_configuration(paths, _infer_autoencoder, step_0_clust=k_means, plot=False, fraction=fraction)
+    cluster_with_configuration(paths, _infer_autoencoder, step_0_clust=hdb, plot=False, fraction=fraction)
+    cluster_with_configuration(paths, _infer_autoencoder, step_1_proj=umap_3d, step_2_clust=hdb, plot=False, fraction=fraction)
 
-    cluster_with_configuration(paths, _infer_autoencoder, step_1_proj=umap_3d, step_2_clust=hdb, plot=False)
-    cluster_with_configuration(paths, _infer_autoencoder, step_0_clust=hdb, step_1_proj=umap_3d, plot=False)
+    # cluster_with_configuration(paths, _infer_cnn, step_0_clust=k_nn_clustering, plot=False, fraction=fraction)
+    # cluster_with_configuration(paths, _infer_cnn, step_0_clust=k_means, plot=False, fraction=fraction)
 
-    cluster_with_configuration(paths, _infer_cnn, step_1_proj=umap_3d, step_2_clust=hdb, plot=False)
-    cluster_with_configuration(paths, _infer_cnn, step_1_proj=umap_3d, step_2_clust=k_means, plot=False)
-    cluster_with_configuration(paths, _infer_cnn, step_0_clust=k_means, plot=False)
+    # cluster_with_configuration(paths, _infer_autoencoder, step_1_proj=umap_3d, step_2_clust=hdb, plot=False, fraction=fraction)
+    # cluster_with_configuration(paths, _infer_autoencoder, step_0_clust=hdb, step_1_proj=umap_3d, plot=False, fraction=fraction)
 
-    cluster_with_configuration(paths, _infer_panns, step_1_proj=umap_3d, step_2_clust=hdb, plot=False)
+    # cluster_with_configuration(paths, _infer_cnn, step_1_proj=umap_3d, step_2_clust=hdb, plot=False, fraction=fraction)
+    # cluster_with_configuration(paths, _infer_cnn, step_1_proj=umap_3d, step_2_clust=k_means, plot=False, fraction=fraction)
+    # cluster_with_configuration(paths, _infer_cnn, step_0_clust=k_means, plot=False, fraction=fraction)
+
+    # cluster_with_configuration(paths, _infer_panns, step_1_proj=umap_3d, step_2_clust=hdb, plot=False, fraction=fraction)
+    # cluster_with_configuration(paths, _infer_panns, step_0_clust=hdb, plot=False, fraction=fraction)

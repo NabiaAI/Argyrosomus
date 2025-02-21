@@ -79,14 +79,20 @@ def pad_too_short(spectrogram, expected_width):
     return spectrogram
 
 class AudioDataset(Dataset):
-    def __init__(self, audio_dir, expected_width, sr=4000, n_mels=64, n_fft=256, hop_length=64, should_augment=False):
-        self.audio_files = glob.glob(os.path.join(audio_dir, "*.wav"))
+    def __init__(self, audio_dir, expected_width, sr=4000, n_mels=64, n_fft=256, hop_length=64, min_val=None, max_val=None, should_augment=False, threshold=None):
+        if isinstance(audio_dir, str):
+            self.audio_files = glob.glob(os.path.join(audio_dir, "*.wav"))
+        else:
+            self.audio_files = audio_dir
         self.sr = sr
         self.n_mels = n_mels
         self.hop_length = hop_length
         self.n_fft = n_fft
         self.expected_width = expected_width
         self.should_augment = should_augment
+        self.min_val = min_val
+        self.max_val = max_val
+        self.threshold = threshold
 
         # Define augmentation pipeline
         self.augment = AA.Compose([
@@ -111,6 +117,11 @@ class AudioDataset(Dataset):
                                                   n_mels=self.n_mels, hop_length=self.hop_length, n_fft=self.n_fft)
         
         mel_spectrogram = pad_too_short(mel_spectrogram, self.expected_width)
+        if self.min_val is not None and self.max_val is not None: # normalize
+            mel_spectrogram = (mel_spectrogram - self.min_val) / (self.max_val - self.min_val)
+
+        if self.threshold is not None:
+            mel_spectrogram = np.where(mel_spectrogram < self.threshold, 0, mel_spectrogram)
         
         mel_spectrogram = torch.tensor(mel_spectrogram).unsqueeze(0).float()  # Add channel dimension
         return mel_spectrogram  # Shape: (1, 64, 128)
@@ -134,8 +145,14 @@ def load_model(path, device='mps'):
     return model
 
 def train(audio_directory, model, device='mps',  num_epochs=100, batch_size=32, lr=0.001, augment=True,
-          patience=10, output_dir="clustering/models", starting_epoch=0, num_workers=0):
-    dataset = AudioDataset(audio_directory, model.expected_shape[-1], should_augment=augment)
+          patience=10, output_dir="clustering/models", starting_epoch=0, num_workers=0, spectro_threshold=None):
+    metrics_dataset = AudioDataset(audio_directory, model.expected_shape[-1], should_augment=False)
+    metrics_loader = DataLoader(metrics_dataset, batch_size=32, shuffle=True, num_workers=num_workers)
+    sample = np.array([next(iter(metrics_loader)).numpy() for _ in range(4)])
+    min_val, max_val = sample.min(), sample.max()
+    print(f"Min value: {min_val}, Max value: {max_val}")
+
+    dataset = AudioDataset(audio_directory, model.expected_shape[-1], min_val=min_val, max_val=max_val, should_augment=augment, threshold=spectro_threshold)
     train_dataset, val_dataset = random_split(dataset, [0.85, 0.15], generator=torch.Generator().manual_seed(0))
     val_dataset.dataset = copy.deepcopy(val_dataset.dataset) 
     val_dataset.dataset.should_augment = False # Disable augmentation for validation set
@@ -148,7 +165,7 @@ def train(audio_directory, model, device='mps',  num_epochs=100, batch_size=32, 
     # Initialize model
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
-    criterion = nn.MSELoss()
+    criterion = nn.MSELoss(reduction='sum')
 
     min_val_loss = float("inf")  # Track best validation loss
     best_epoch = 0
@@ -208,21 +225,13 @@ def train(audio_directory, model, device='mps',  num_epochs=100, batch_size=32, 
             print(f"Early stopping triggered after {patience} epochs without improvement in epoch {epoch}.")
             break
 
-if __name__ == '__main__':
-    # model = MelSpectrogramAutoencoder(expected_shape=(1, 64, 192), latent_dim=64) # 1 Channel, 64 mel bins, 192 time bins (3 s audio at 4000 Hz (rounded to next multiple of 8))
-    # batch_size=32
-    # in_size = (batch_size,) + model.expected_shape
-    # summary(model, input_size=in_size)
-    # train("YOLO/data/train/audio_segments", model, device='mps', num_epochs=150, num_workers=0,
-    #       batch_size=batch_size , lr=0.001, patience=10, output_dir="clustering/models", augment=True)
-
-
+def check_reconstruction():
     # infer example:
     model = load_model("clustering/models/autoencoder_best.pth").eval()
-    example_wav = "YOLO/data/validation/audio_segments/20210706_2027_-21.000-21.167_segment_135.wav"
-    audio, sr = librosa.load(example_wav, sr=4000)
-    mel_spectrogram = extract_mel_spectrogram(audio, sr=sr,)
-    mel_spectrogram = torch.tensor(mel_spectrogram).unsqueeze(0).unsqueeze(0).float()  # Add channel and batch dimension
+    example_wav = "YOLO/data/validation/audio_segments/20161117_0757_-08.000-08.167_segment_878.wav"
+    audio_set = AudioDataset([example_wav], model.expected_shape[-1], should_augment=False, threshold=0.45, min_val=-80.0, max_val=9.5367431640625e-07)
+    mel_spectrogram = next(iter(DataLoader(audio_set, batch_size=1)))
+    sr=4000
     with torch.no_grad():
         recon, _ = model(mel_spectrogram)
     recon = recon.squeeze().detach().cpu().numpy()
@@ -231,8 +240,20 @@ if __name__ == '__main__':
     # Plot original and reconstructed spectrogram
     import matplotlib.pyplot as plt
     fig, axs = plt.subplots(2, 1, figsize=(12, 8))
-    librosa.display.specshow(mel_spectrogram.squeeze().cpu().numpy(), sr=sr, hop_length=64, x_axis='time', y_axis='mel', ax=axs[0])
-    axs[0].set_title("Original Mel Spectrogram")
+    mel_spectrogram = mel_spectrogram.squeeze().cpu().numpy()
+    librosa.display.specshow(mel_spectrogram, sr=sr, hop_length=64, x_axis='time', y_axis='mel', ax=axs[0])
+    axs[0].set_title(f"Original Mel Spectrogram {np.min(mel_spectrogram)}, {np.max(mel_spectrogram)}")
     librosa.display.specshow(recon, sr=sr, hop_length=64, x_axis='time', y_axis='mel', ax=axs[1])
-    axs[1].set_title("Reconstructed Mel Spectrogram")
+    axs[1].set_title(f"Reconstructed Mel Spectrogram {np.min(recon)}, {np.max(recon)}")
     plt.show()
+
+if __name__ == '__main__':
+    # --- TRAIN NEW MODEL ---
+    # model = MelSpectrogramAutoencoder(expected_shape=(1, 64, 64), latent_dim=64) # 1 Channel, 64 mel bins, 64 time bins (1 s audio at 4000 Hz (rounded to next multiple of 8))
+    # batch_size=128
+    # in_size = (batch_size,) + model.expected_shape
+    # summary(model, input_size=in_size)
+    # train("YOLO/data/train/audio_segments", model, device='mps', num_epochs=150, num_workers=0,
+    #       batch_size=batch_size , lr=0.001, patience=10, output_dir="clustering/models", augment=True, spectro_threshold=0.45)
+
+    check_reconstruction()
