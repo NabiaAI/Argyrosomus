@@ -607,7 +607,7 @@ if __name__ == '__main__':
 
     # create data for training (including split train and validation)
     list_path = "./data/train/list.txt"
-    audio_folder = "./labeled_data/train/audio"
+    audio_folder = "./../labeled_data/train/audio"
     image_folder = "./data/train/images"
     labels_folder = "./data/train/labels"
     segment_folder = './data/train/audio_segments'
@@ -616,7 +616,7 @@ if __name__ == '__main__':
 
     # create data only for validation/testing
     list_path = "./data/validation/list.txt"
-    audio_folder = "./labeled_data/validation/audio"
+    audio_folder = "./../labeled_data/validation/audio"
     image_folder = "./data/validation/images"
     labels_folder = "./data/validation/labels"
     segment_folder = './data/validation/audio_segments'
